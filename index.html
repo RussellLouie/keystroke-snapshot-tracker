@@ -282,8 +282,18 @@ async function saveTracking(id, status, notes){
    Render
    ============================================================ */
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
-function fmt(v){ if(!v) return ""; const d=new Date(v); return isNaN(d)?v:d.toLocaleString([], {year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
-function typeClass(t){ return "t-"+(t||"").toLowerCase().replace(/[^a-z]/g,""); }
+function excelSerialToDate(n){ return new Date(Math.round((n-25569)*86400*1000)); }
+function fmtDate(d){ return d.toLocaleString([], {year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+function fmt(v){
+  if(v===null||v===undefined||v==="") return "";
+  if(typeof v==="number" || /^\d+(\.\d+)?$/.test(String(v).trim())){
+    const n=parseFloat(v);
+    if(n>20000 && n<80000){ const d=excelSerialToDate(n); if(!isNaN(d)) return fmtDate(d); }
+  }
+  const d=new Date(v); return isNaN(d)?String(v):fmtDate(d);
+}
+function cleanType(t){ return (t||"").replace(/[;,\s]+$/,"").trim(); }
+function typeClass(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return "t-keystroke"; if(t.indexOf("snap")>=0) return "t-snapshot"; return ""; }
 function prioClass(p){ return "p-"+(p||"").toLowerCase().replace(/[^a-z]/g,""); }
 function statusClass(s){ return "s-"+(s||"").toLowerCase().replace(/[^a-z]/g,""); }
 
@@ -316,7 +326,7 @@ function buildRows(values){
 function filtered(){
   const q=$("search").value.toLowerCase().trim(), ft=$("fType").value, fs=$("fStatus").value, fp=$("fPriority").value;
   let out=rows.filter(r=>{
-    if(ft && (r.type||"").toLowerCase()!==ft.toLowerCase()) return false;
+    if(ft){ const a=(r.type||"").toLowerCase(); const key=ft.toLowerCase().indexOf("key")>=0?"key":"snap"; if(a.indexOf(key)<0) return false; }
     if(fs && (r.status||"").toLowerCase()!==fs.toLowerCase()) return false;
     if(fp && (r.priority||"").toLowerCase()!==fp.toLowerCase()) return false;
     if(q){ const hay=(r.requester+" "+r.content+" "+r.reqNotes+" "+r.notes+" "+r.ticketId).toLowerCase(); if(hay.indexOf(q)<0) return false; }
@@ -340,7 +350,7 @@ function renderStats(){
     const s=(r.status||"").toLowerCase();
     if(s==="pending")pend++; else if(s==="in progress")prog++; else if(s==="done")done++;
     const t=(r.type||"").toLowerCase();
-    if(t==="keystroke")keys++; else if(t==="snapshot")snaps++;
+    if(t.indexOf("key")>=0)keys++; else if(t.indexOf("snap")>=0)snaps++;
   });
   const s=[["Total",total],["Pending",pend],["In progress",prog],["Done",done],["Keystrokes",keys],["Snapshots",snaps]];
   $("stats").innerHTML=s.map(x=>`<div class="stat"><div class="n">${x[1]}</div><div class="l">${x[0]}</div></div>`).join("");
@@ -358,7 +368,7 @@ function render(){
       return `<tr data-id="${esc(r.id)}">
         <td>${esc(fmt(r.submitted))}</td>
         <td>${esc(r.requester)}</td>
-        <td>${r.type?`<span class="pill ${typeClass(r.type)}">${esc(r.type)}</span>`:""}</td>
+        <td>${r.type?`<span class="pill ${typeClass(r.type)}">${esc(cleanType(r.type))}</span>`:""}</td>
         <td class="content">${r.content?esc(r.content):'<span class="muted">—</span>'}</td>
         <td>${r.priority?`<span class="pill ${prioClass(r.priority)}">${esc(r.priority)}</span>`:""}</td>
         <td>${ticket}</td>
