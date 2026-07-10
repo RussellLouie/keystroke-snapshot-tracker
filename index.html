@@ -120,7 +120,10 @@
 const CONFIG = {
   clientId:  "f137c106-8b94-4885-9deb-f69e4da34bef",   // Application (client) ID from Azure
   tenantId:  "23dfa179-96b2-40f6-abd4-7fea317f0af6",   // Directory (tenant) ID
-  // Sharing link to the Forms responses workbook (the link Russell shared):
+  // Direct file identifiers (preferred — uses the user's own permissions on the file):
+  driveId: "b!ixQ2ZF4uNUiCocXXbRs3QfcWq0erX2hAksyf2PRcb8pkjAF2oXrUQ73Nnq-iGjSG",
+  itemId:  "01KORMWVQ5GXUZ5Y55SRBLHZSFFT2GLI5D",
+  // Fallback sharing link (only used if driveId/itemId are blank):
   sharingUrl: "https://goteam1-my.sharepoint.com/:x:/g/personal/russell_bual_go_team/IQAdNeme472UQrPmRSz0ZaOjAb4VtqP0xnT3EvT_vWuzDWU",
   // Optional: name of the worksheet that holds form responses. Leave "" to auto-detect (first non-Tracking sheet).
   responseSheet: "",
@@ -193,6 +196,7 @@ let tracking={};               // responseId -> {status, notes, rowIndex}
 let sortKey="submitted", sortDir=-1;
 
 async function resolveWorkbook(){
+  if(CONFIG.driveId && CONFIG.itemId){ DRIVE_ID=CONFIG.driveId; ITEM_ID=CONFIG.itemId; return; }
   const share = encodeShareUrl(CONFIG.sharingUrl);
   const di = await graph("/shares/"+share+"/driveItem?$select=id,parentReference,name");
   ITEM_ID = di.id;
