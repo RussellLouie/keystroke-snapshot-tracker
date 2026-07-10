@@ -267,7 +267,7 @@ async function ensureTracking(){
 async function readTracking(){
   tracking={};
   try {
-    const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange(valuesOnly=true)?$select=values");
+    const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange?$select=values");
     (r.values||[]).forEach((row,i)=>{
       const id=(row[0]||"").toString();
       if(id) tracking[id]={ status:row[1]||"Pending", notes:row[2]||"", rowIndex:i };
