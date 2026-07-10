@@ -120,11 +120,11 @@
 const CONFIG = {
   clientId:  "f137c106-8b94-4885-9deb-f69e4da34bef",   // Application (client) ID from Azure
   tenantId:  "23dfa179-96b2-40f6-abd4-7fea317f0af6",   // Directory (tenant) ID
-  // Direct file identifiers (preferred — uses the user's own permissions on the file):
-  driveId: "b!ixQ2ZF4uNUiCocXXbRs3QfcWq0erX2hAksyf2PRcb8pkjAF2oXrUQ73Nnq-iGjSG",
-  itemId:  "01KORMWVQ5GXUZ5Y55SRBLHZSFFT2GLI5D",
+  // ITOperations SharePoint site drive — addressable by all site members:
+  driveId: "b!5xdxxrM02kKU0Vd6s3N1VCQFI-4NHF1NqjfzPQFhWnXVr2O8LyIlR7QnFwP0vDFj",
+  itemId:  "01RQCON74M7OD4CMEFTBCKLLXVXXU3QIRQ",
   // Fallback sharing link (only used if driveId/itemId are blank):
-  sharingUrl: "https://goteam1-my.sharepoint.com/:x:/g/personal/russell_bual_go_team/IQAdNeme472UQrPmRSz0ZaOjAb4VtqP0xnT3EvT_vWuzDWU",
+  sharingUrl: "",
   // Optional: name of the worksheet that holds form responses. Leave "" to auto-detect (first non-Tracking sheet).
   responseSheet: "",
   // Worksheet used to store shared status/notes (created automatically if missing):
@@ -176,7 +176,7 @@ async function graph(path, opts){
   const res = await fetch(GRAPH + path, Object.assign({
     headers: Object.assign({ "Authorization":"Bearer "+token, "Content-Type":"application/json" }, (opts&&opts.headers)||{})
   }, opts||{}));
-  if(!res.ok){ const t = await res.text(); throw new Error("Graph "+res.status+": "+t); }
+  if(!res.ok){ const t = await res.text(); throw new Error("Graph "+res.status+" at "+path.split("?")[0]+": "+t); }
   const ct = res.headers.get("content-type")||"";
   return ct.indexOf("application/json")>=0 ? res.json() : res.text();
 }
