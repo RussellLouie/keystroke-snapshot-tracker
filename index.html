@@ -428,19 +428,30 @@ function exportCsv(){
 /* ============================================================
    Boot
    ============================================================ */
+let lastValues=[];
 async function loadData(){
   hideBanner(); $("loading").style.display="block"; $("tbl").style.display="none";
+  // 1) Read + show responses (reads work even if the workbook is open/locked elsewhere)
   try{
     if(!DRIVE_ID) await resolveWorkbook();
-    await ensureTracking();
-    await readTracking();
-    const values=await readResponses();
-    buildRows(values);
+    lastValues = await readResponses();
+    tracking = {};
+    buildRows(lastValues);
     render();
     $("loading").style.display="none"; $("tbl").style.display="table";
   }catch(err){
     $("loading").style.display="none";
     showBanner("Couldn't load data: "+err.message,"err");
+    return;
+  }
+  // 2) Load shared status/notes overlay (best effort — may be locked briefly)
+  try{
+    await ensureTracking();
+    await readTracking();
+    buildRows(lastValues);
+    render();
+  }catch(e){
+    showBanner("Requests are shown. Status/notes editing is briefly unavailable because the workbook is open for editing elsewhere — click Reload in a moment.","info");
   }
 }
 
