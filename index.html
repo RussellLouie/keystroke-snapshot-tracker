@@ -244,19 +244,24 @@ function mapHeaders(header){
 }
 
 async function ensureTracking(){
+  // If the tracking TABLE already exists, we're done.
+  try{
+    await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"?$select=name");
+    return;
+  }catch(e){ /* table missing — (re)create below */ }
+  // Ensure the tracking worksheet exists (may already exist from a partial setup).
   const sheets = await listSheets();
   if(sheets.indexOf(CONFIG.trackingSheet)<0){
     await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:CONFIG.trackingSheet})});
-    // write header row
-    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:E1')",
-      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","UpdatedBy","UpdatedAt"]]})});
-    await graph(itemBase()+"/workbook/tables/add",
-      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:E1",hasHeaders:true})});
-    // name the table
-    const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
-    const t = tbls.value[tbls.value.length-1];
-    await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
   }
+  // Write header row, then build the table over it.
+  await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:E1')",
+    {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","UpdatedBy","UpdatedAt"]]})});
+  await graph(itemBase()+"/workbook/tables/add",
+    {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:E1",hasHeaders:true})});
+  const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
+  const t = tbls.value[tbls.value.length-1];
+  await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
 }
 
 async function readTracking(){
