@@ -112,7 +112,7 @@
 </div>
 
 <!-- MSAL -->
-<script src="https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
 <script>
 /* ============================================================
    CONFIG — fill these in (see README.md)
@@ -438,11 +438,17 @@ $("signinBtn").onclick = async ()=>{
 $("signoutBtn").onclick = ()=>{ msalApp.logoutPopup().then(()=>{ account=null; showSignin(); }); };
 
 (async function init(){
-  await msalApp.initialize();
-  await msalApp.handleRedirectPromise();
-  const accts=msalApp.getAllAccounts();
-  if(accts.length){ account=accts[0]; msalApp.setActiveAccount(account); showApp(); }
-  else showSignin();
+  try{
+    if(typeof msalApp.initialize==="function") await msalApp.initialize();
+    await msalApp.handleRedirectPromise();
+    const accts=msalApp.getAllAccounts();
+    if(accts.length){ account=accts[0]; msalApp.setActiveAccount(account); showApp(); }
+    else showSignin();
+  }catch(e){
+    showSignin();
+    const p=document.querySelector("#signin-view p");
+    if(p) p.textContent="Startup error: "+(e && e.message ? e.message : e);
+  }
 })();
 </script>
 </body>
