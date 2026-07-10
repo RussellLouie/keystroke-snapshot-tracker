@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Request Dashboard</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#f6f7f9; color:#1a1a1a;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px; line-height:1.45; }
+  .wrap { max-width:1200px; margin:0 auto; padding:20px; }
+  header.top { display:flex; align-items:center; gap:14px; margin-bottom:6px; }
+  h1 { font-size:22px; margin:0; }
+  .sub { color:#667085; margin:0 0 16px; }
+  .who { margin-left:auto; display:flex; align-items:center; gap:10px; color:#475467; font-size:13px; }
+
+  button { cursor:pointer; border:none; border-radius:8px; padding:9px 16px; font-weight:600; font:inherit; }
+  .btn-primary { background:#2563eb; color:#fff; } .btn-primary:hover{ background:#1d4ed8; }
+  .btn-ghost { background:#f2f4f7; color:#344054; } .btn-ghost:hover{ background:#e4e7ec; }
+
+  #signin-view { text-align:center; padding:80px 20px; }
+  #signin-view p { color:#667085; max-width:440px; margin:10px auto 22px; }
+
+  .banner { border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:13px; display:none; }
+  .banner.err { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; display:block; }
+  .banner.info { background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; display:block; }
+
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin-bottom:20px; }
+  .stat { background:#fff; border:1px solid #e6e8eb; border-radius:10px; padding:14px 16px; }
+  .stat .n { font-size:26px; font-weight:700; } .stat .l { color:#667085; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+
+  .card { background:#fff; border:1px solid #e6e8eb; border-radius:12px; padding:16px; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:12px; }
+  .toolbar input, .toolbar select { padding:8px 10px; border:1px solid #d0d5dd; border-radius:8px; background:#fff; font:inherit; }
+  .toolbar .search { flex:1; min-width:180px; } .spacer { flex:1; }
+
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid #eef0f2; vertical-align:top; }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#667085; cursor:pointer; user-select:none; white-space:nowrap; }
+  th:hover{ color:#1a1a1a; }
+  td.content { max-width:280px; }
+  .muted { color:#98a2b3; font-style:italic; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .t-keystroke{ background:#eef2ff; color:#4338ca; } .t-snapshot{ background:#ecfdf5; color:#047857; }
+  .p-high{ background:#fee2e2; color:#b91c1c; } .p-medium{ background:#fef9c3; color:#854d0e; } .p-low{ background:#f1f5f9; color:#475569; }
+  .yes { color:#166534; font-weight:600; } .no { color:#98a2b3; }
+  select.status-sel { padding:5px 8px; border:1px solid #d0d5dd; border-radius:7px; font:inherit; background:#fff; }
+  select.status-sel.s-pending{ background:#fef3c7; } select.status-sel.s-inprogress{ background:#dbeafe; } select.status-sel.s-done{ background:#dcfce7; }
+  input.notes-in { width:100%; min-width:150px; padding:5px 8px; border:1px solid #e4e7ec; border-radius:7px; font:inherit; }
+  .saving { font-size:11px; color:#98a2b3; }
+  .empty { text-align:center; color:#98a2b3; padding:34px; }
+  .foot { color:#98a2b3; font-size:12px; text-align:right; margin-top:10px; }
+  #loading { text-align:center; color:#667085; padding:40px; }
+  @media (max-width:640px){ td.content{ max-width:160px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- SIGN-IN -->
+  <div id="signin-view" style="display:none">
+    <h1>Request Dashboard</h1>
+    <p>Sign in with your 1go.team Microsoft account to view and manage requested keystrokes and snapshots.</p>
+    <button class="btn-primary" id="signinBtn">Sign in with Microsoft</button>
+  </div>
+
+  <!-- APP -->
+  <div id="app-view" style="display:none">
+    <header class="top">
+      <h1>Request Dashboard</h1>
+      <div class="who">
+        <span id="whoami"></span>
+        <button class="btn-ghost" id="reloadBtn">Reload</button>
+        <button class="btn-ghost" id="signoutBtn">Sign out</button>
+      </div>
+    </header>
+    <p class="sub">Requested keystrokes and snapshots. Submissions come from the Microsoft Form; status &amp; notes are shared across the team.</p>
+
+    <div class="banner" id="banner"></div>
+    <div class="stats" id="stats"></div>
+
+    <div class="card">
+      <div class="toolbar">
+        <input class="search" id="search" placeholder="Search requester, content, notes…">
+        <select id="fType"><option value="">All types</option><option>Keystroke</option><option>Snapshot</option></select>
+        <select id="fStatus"><option value="">All statuses</option><option>Pending</option><option>In progress</option><option>Done</option></select>
+        <select id="fPriority"><option value="">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select>
+        <div class="spacer"></div>
+        <button class="btn-ghost" id="exportBtn">Export CSV</button>
+      </div>
+      <div id="loading">Loading requests…</div>
+      <table id="tbl" style="display:none">
+        <thead><tr>
+          <th data-sort="submitted">Submitted</th>
+          <th data-sort="requester">Requester</th>
+          <th data-sort="type">Type</th>
+          <th data-sort="content">Content</th>
+          <th data-sort="priority">Priority</th>
+          <th data-sort="ticket">Ticket</th>
+          <th data-sort="reqNotes">Requester notes</th>
+          <th data-sort="status">Status</th>
+          <th>Internal notes</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="foot" id="foot"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- MSAL -->
+<script src="https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js"></script>
+<script>
+/* ============================================================
+   CONFIG — fill these in (see README.md)
+   ============================================================ */
+const CONFIG = {
+  clientId:  "YOUR_AZURE_APP_CLIENT_ID",        // Application (client) ID from Azure
+  tenantId:  "YOUR_TENANT_ID",                  // Directory (tenant) ID (goteam1)
+  // Sharing link to the Forms responses workbook (the link Russell shared):
+  sharingUrl: "https://goteam1-my.sharepoint.com/:x:/g/personal/russell_bual_go_team/IQAdNeme472UQrPmRSz0ZaOjAb4VtqP0xnT3EvT_vWuzDWU",
+  // Optional: name of the worksheet that holds form responses. Leave "" to auto-detect (first non-Tracking sheet).
+  responseSheet: "",
+  // Worksheet used to store shared status/notes (created automatically if missing):
+  trackingSheet: "Tracking",
+  trackingTable: "TrackingTable"
+};
+const GRAPH = "https://graph.microsoft.com/v1.0";
+const SCOPES = ["User.Read", "Files.ReadWrite.All"];
+
+/* ============================================================
+   Header mapping — matches Form question columns loosely by name.
+   Adjust the keywords if your form question titles differ.
+   ============================================================ */
+const FIELD_MATCHERS = {
+  submitted: ["completion time","completion","submit","start time"],
+  requester: ["your name","requester","name","email"],
+  type:      ["request type","type"],
+  content:   ["content","description"],
+  priority:  ["priority"],
+  reqNotes:  ["notes"],
+  ticketRaised: ["ticket raised","raised"],
+  ticketId:  ["ticket id","ticket number","ticket"]
+};
+
+/* ============================================================
+   MSAL setup
+   ============================================================ */
+const msalApp = new msal.PublicClientApplication({
+  auth: {
+    clientId: CONFIG.clientId,
+    authority: "https://login.microsoftonline.com/" + CONFIG.tenantId,
+    redirectUri: window.location.origin + window.location.pathname
+  },
+  cache: { cacheLocation: "sessionStorage" }
+});
+let account = null;
+
+const $ = id => document.getElementById(id);
+function showBanner(msg, kind){ const b=$("banner"); b.textContent=msg; b.className="banner "+(kind||"info"); }
+function hideBanner(){ $("banner").className="banner"; }
+
+async function getToken(){
+  const req = { scopes: SCOPES, account };
+  try { return (await msalApp.acquireTokenSilent(req)).accessToken; }
+  catch(e){ const r = await msalApp.acquireTokenPopup(req); return r.accessToken; }
+}
+async function graph(path, opts){
+  const token = await getToken();
+  const res = await fetch(GRAPH + path, Object.assign({
+    headers: Object.assign({ "Authorization":"Bearer "+token, "Content-Type":"application/json" }, (opts&&opts.headers)||{})
+  }, opts||{}));
+  if(!res.ok){ const t = await res.text(); throw new Error("Graph "+res.status+": "+t); }
+  const ct = res.headers.get("content-type")||"";
+  return ct.indexOf("application/json")>=0 ? res.json() : res.text();
+}
+
+/* Encode a sharing URL into a Graph share id (per MS docs) */
+function encodeShareUrl(url){
+  const b64 = btoa(unescape(encodeURIComponent(url)));
+  return "u!" + b64.replace(/=+$/,"").replace(/\//g,"_").replace(/\+/g,"-");
+}
+
+/* ============================================================
+   Data layer
+   ============================================================ */
+let DRIVE_ID=null, ITEM_ID=null, RESP_SHEET=null;
+let rows=[];                    // merged records
+let tracking={};               // responseId -> {status, notes, rowIndex}
+let sortKey="submitted", sortDir=-1;
+
+async function resolveWorkbook(){
+  const share = encodeShareUrl(CONFIG.sharingUrl);
+  const di = await graph("/shares/"+share+"/driveItem?$select=id,parentReference,name");
+  ITEM_ID = di.id;
+  DRIVE_ID = di.parentReference && di.parentReference.driveId;
+  if(!DRIVE_ID) throw new Error("Could not resolve driveId for the shared workbook.");
+}
+
+async function listSheets(){
+  const r = await graph(itemBase()+"/workbook/worksheets?$select=name");
+  return r.value.map(w=>w.name);
+}
+function itemBase(){ return "/drives/"+DRIVE_ID+"/items/"+ITEM_ID; }
+
+async function readResponses(){
+  if(!RESP_SHEET){
+    const sheets = await listSheets();
+    RESP_SHEET = CONFIG.responseSheet ||
+      sheets.find(n => n !== CONFIG.trackingSheet) || sheets[0];
+  }
+  const r = await graph(itemBase()+"/workbook/worksheets('"+encodeURIComponent(RESP_SHEET)+"')/usedRange(valuesOnly=true)?$select=values");
+  return r.values || [];
+}
+
+/* Build a header -> column index map, then map to our fields */
+function mapHeaders(header){
+  const idx={};
+  header.forEach((h,i)=>{ idx[(h||"").toString().trim().toLowerCase()]=i; });
+  const find = keys => {
+    for(const k of keys){
+      for(const h in idx){ if(h.indexOf(k)>=0) return idx[h]; }
+    }
+    return -1;
+  };
+  const m={};
+  for(const f in FIELD_MATCHERS) m[f]=find(FIELD_MATCHERS[f]);
+  // 'ID' column from Forms is the stable response key
+  m.id = (idx["id"]!==undefined)?idx["id"]:-1;
+  return m;
+}
+
+async function ensureTracking(){
+  const sheets = await listSheets();
+  if(sheets.indexOf(CONFIG.trackingSheet)<0){
+    await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:CONFIG.trackingSheet})});
+    // write header row
+    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:E1')",
+      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","UpdatedBy","UpdatedAt"]]})});
+    await graph(itemBase()+"/workbook/tables/add",
+      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:E1",hasHeaders:true})});
+    // name the table
+    const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
+    const t = tbls.value[tbls.value.length-1];
+    await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
+  }
+}
+
+async function readTracking(){
+  tracking={};
+  try {
+    const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange(valuesOnly=true)?$select=values");
+    (r.values||[]).forEach((row,i)=>{
+      const id=(row[0]||"").toString();
+      if(id) tracking[id]={ status:row[1]||"Pending", notes:row[2]||"", rowIndex:i };
+    });
+  } catch(e){ /* table empty or missing rows -> ignore */ }
+}
+
+async function saveTracking(id, status, notes){
+  const who = (account && (account.username||account.name)) || "";
+  const when = new Date().toISOString();
+  const existing = tracking[id];
+  if(existing && typeof existing.rowIndex==="number"){
+    // update the table row in place
+    const range = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange?$select=address");
+    // PATCH just this row via the table rows endpoint
+    await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+existing.rowIndex+")",
+      {method:"PATCH",body:JSON.stringify({values:[[id,status,notes,who,when]]})});
+    existing.status=status; existing.notes=notes;
+  } else {
+    const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/add",
+      {method:"POST",body:JSON.stringify({values:[[id,status,notes,who,when]]})});
+    tracking[id]={ status, notes, rowIndex:Object.keys(tracking).length };
+  }
+}
+
+/* ============================================================
+   Render
+   ============================================================ */
+function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+function fmt(v){ if(!v) return ""; const d=new Date(v); return isNaN(d)?v:d.toLocaleString([], {year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+function typeClass(t){ return "t-"+(t||"").toLowerCase().replace(/[^a-z]/g,""); }
+function prioClass(p){ return "p-"+(p||"").toLowerCase().replace(/[^a-z]/g,""); }
+function statusClass(s){ return "s-"+(s||"").toLowerCase().replace(/[^a-z]/g,""); }
+
+function buildRows(values){
+  rows=[];
+  if(!values.length) return;
+  const m = mapHeaders(values[0]);
+  for(let i=1;i<values.length;i++){
+    const r=values[i];
+    if(!r || r.every(c=>c===""||c==null)) continue;
+    const get = k => (m[k]>=0 && m[k]<r.length) ? r[m[k]] : "";
+    const id = (m.id>=0 ? r[m.id] : "row"+i).toString();
+    const track = tracking[id] || {};
+    rows.push({
+      id,
+      submitted: get("submitted"),
+      requester: get("requester"),
+      type: get("type"),
+      content: get("content"),
+      priority: get("priority"),
+      reqNotes: get("reqNotes"),
+      ticketRaised: get("ticketRaised"),
+      ticketId: get("ticketId"),
+      status: track.status || "Pending",
+      notes: track.notes || ""
+    });
+  }
+}
+
+function filtered(){
+  const q=$("search").value.toLowerCase().trim(), ft=$("fType").value, fs=$("fStatus").value, fp=$("fPriority").value;
+  let out=rows.filter(r=>{
+    if(ft && (r.type||"").toLowerCase()!==ft.toLowerCase()) return false;
+    if(fs && (r.status||"").toLowerCase()!==fs.toLowerCase()) return false;
+    if(fp && (r.priority||"").toLowerCase()!==fp.toLowerCase()) return false;
+    if(q){ const hay=(r.requester+" "+r.content+" "+r.reqNotes+" "+r.notes+" "+r.ticketId).toLowerCase(); if(hay.indexOf(q)<0) return false; }
+    return true;
+  });
+  const pr={high:3,medium:2,low:1}, st={pending:1,"in progress":2,done:3};
+  out.sort((a,b)=>{
+    let av=a[sortKey], bv=b[sortKey];
+    if(sortKey==="priority"){ av=pr[(av||"").toLowerCase()]||0; bv=pr[(bv||"").toLowerCase()]||0; }
+    else if(sortKey==="status"){ av=st[(av||"").toLowerCase()]||0; bv=st[(bv||"").toLowerCase()]||0; }
+    else if(sortKey==="submitted"){ av=new Date(av).getTime()||0; bv=new Date(bv).getTime()||0; }
+    else { av=(av||"").toString().toLowerCase(); bv=(bv||"").toString().toLowerCase(); }
+    return av<bv?-1*sortDir:av>bv?1*sortDir:0;
+  });
+  return out;
+}
+
+function renderStats(){
+  let total=rows.length,pend=0,prog=0,done=0,keys=0,snaps=0;
+  rows.forEach(r=>{
+    const s=(r.status||"").toLowerCase();
+    if(s==="pending")pend++; else if(s==="in progress")prog++; else if(s==="done")done++;
+    const t=(r.type||"").toLowerCase();
+    if(t==="keystroke")keys++; else if(t==="snapshot")snaps++;
+  });
+  const s=[["Total",total],["Pending",pend],["In progress",prog],["Done",done],["Keystrokes",keys],["Snapshots",snaps]];
+  $("stats").innerHTML=s.map(x=>`<div class="stat"><div class="n">${x[1]}</div><div class="l">${x[0]}</div></div>`).join("");
+}
+
+function render(){
+  renderStats();
+  const list=filtered(), tb=$("tbody");
+  if(!list.length){ tb.innerHTML=`<tr><td colspan="9" class="empty">No requests match.</td></tr>`; }
+  else {
+    tb.innerHTML=list.map(r=>{
+      const ticket = (r.ticketRaised||"").toString().toLowerCase().indexOf("yes")>=0
+        ? `<span class="yes">${esc(r.ticketId||"Yes")}</span>` : `<span class="no">—</span>`;
+      const opts=["Pending","In progress","Done"].map(o=>`<option${o===r.status?" selected":""}>${o}</option>`).join("");
+      return `<tr data-id="${esc(r.id)}">
+        <td>${esc(fmt(r.submitted))}</td>
+        <td>${esc(r.requester)}</td>
+        <td>${r.type?`<span class="pill ${typeClass(r.type)}">${esc(r.type)}</span>`:""}</td>
+        <td class="content">${r.content?esc(r.content):'<span class="muted">—</span>'}</td>
+        <td>${r.priority?`<span class="pill ${prioClass(r.priority)}">${esc(r.priority)}</span>`:""}</td>
+        <td>${ticket}</td>
+        <td class="content">${r.reqNotes?esc(r.reqNotes):'<span class="muted">—</span>'}</td>
+        <td><select class="status-sel ${statusClass(r.status)}" data-act="status">${opts}</select></td>
+        <td><input class="notes-in" data-act="notes" value="${esc(r.notes)}" placeholder="Add note…"> <span class="saving" data-role="save"></span></td>
+      </tr>`;
+    }).join("");
+  }
+  $("foot").textContent=`${list.length} of ${rows.length} request${rows.length===1?"":"s"} shown`;
+}
+
+/* ============================================================
+   Events
+   ============================================================ */
+function wire(){
+  $("search").oninput=$("fType").onchange=$("fStatus").onchange=$("fPriority").onchange=render;
+  document.querySelectorAll("th[data-sort]").forEach(th=>{
+    th.onclick=()=>{ const k=th.getAttribute("data-sort"); if(sortKey===k)sortDir*=-1; else {sortKey=k;sortDir=1;} render(); };
+  });
+  $("tbody").addEventListener("change", onEdit);
+  $("tbody").addEventListener("blur", onEdit, true);
+  $("reloadBtn").onclick=loadData;
+  $("exportBtn").onclick=exportCsv;
+}
+let editTimer=null;
+async function onEdit(e){
+  const act=e.target.getAttribute("data-act"); if(!act) return;
+  const tr=e.target.closest("tr"); const id=tr.getAttribute("data-id");
+  const rec=rows.find(x=>x.id===id); if(!rec) return;
+  const sel=tr.querySelector('[data-act="status"]'); const inp=tr.querySelector('[data-act="notes"]');
+  rec.status=sel.value; rec.notes=inp.value;
+  sel.className="status-sel "+statusClass(rec.status);
+  const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
+  try{ await saveTracking(id, rec.status, rec.notes); if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500);} renderStats(); }
+  catch(err){ if(badge) badge.textContent=""; showBanner("Couldn't save change: "+err.message,"err"); }
+}
+
+function exportCsv(){
+  const cols=[["submitted","Submitted"],["requester","Requester"],["type","Type"],["content","Content"],["priority","Priority"],["ticketRaised","Ticket raised"],["ticketId","Ticket ID"],["reqNotes","Requester notes"],["status","Status"],["notes","Internal notes"]];
+  const lines=[cols.map(c=>c[1]).join(",")].concat(filtered().map(r=>
+    cols.map(c=>'"'+String(r[c[0]]==null?"":r[c[0]]).replace(/"/g,'""')+'"').join(",")));
+  const blob=new Blob([lines.join("\n")],{type:"text/csv"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="requests.csv"; a.click();
+}
+
+/* ============================================================
+   Boot
+   ============================================================ */
+async function loadData(){
+  hideBanner(); $("loading").style.display="block"; $("tbl").style.display="none";
+  try{
+    if(!DRIVE_ID) await resolveWorkbook();
+    await ensureTracking();
+    await readTracking();
+    const values=await readResponses();
+    buildRows(values);
+    render();
+    $("loading").style.display="none"; $("tbl").style.display="table";
+  }catch(err){
+    $("loading").style.display="none";
+    showBanner("Couldn't load data: "+err.message,"err");
+  }
+}
+
+function showApp(){
+  $("signin-view").style.display="none"; $("app-view").style.display="block";
+  $("whoami").textContent = account.name || account.username || "";
+  wire(); loadData();
+}
+function showSignin(){ $("signin-view").style.display="block"; $("app-view").style.display="none"; }
+
+$("signinBtn").onclick = async ()=>{
+  try{ const r=await msalApp.loginPopup({scopes:SCOPES}); account=r.account; msalApp.setActiveAccount(account); showApp(); }
+  catch(e){ showBanner("Sign-in failed: "+e.message,"err"); }
+};
+$("signoutBtn").onclick = ()=>{ msalApp.logoutPopup().then(()=>{ account=null; showSignin(); }); };
+
+(async function init(){
+  await msalApp.initialize();
+  await msalApp.handleRedirectPromise();
+  const accts=msalApp.getAllAccounts();
+  if(accts.length){ account=accts[0]; msalApp.setActiveAccount(account); showApp(); }
+  else showSignin();
+})();
+</script>
+</body>
+</html>
