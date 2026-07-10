@@ -166,7 +166,7 @@ function hideBanner(){ $("banner").className="banner"; }
 async function getToken(){
   const req = { scopes: SCOPES, account };
   try { return (await msalApp.acquireTokenSilent(req)).accessToken; }
-  catch(e){ const r = await msalApp.acquireTokenPopup(req); return r.accessToken; }
+  catch(e){ await msalApp.acquireTokenRedirect(req); throw e; }
 }
 async function graph(path, opts){
   const token = await getToken();
@@ -431,18 +431,16 @@ function showApp(){
 }
 function showSignin(){ $("signin-view").style.display="block"; $("app-view").style.display="none"; }
 
-$("signinBtn").onclick = async ()=>{
-  try{ const r=await msalApp.loginPopup({scopes:SCOPES}); account=r.account; msalApp.setActiveAccount(account); showApp(); }
-  catch(e){ showBanner("Sign-in failed: "+e.message,"err"); }
-};
-$("signoutBtn").onclick = ()=>{ msalApp.logoutPopup().then(()=>{ account=null; showSignin(); }); };
+$("signinBtn").onclick = ()=>{ msalApp.loginRedirect({ scopes: SCOPES }); };
+$("signoutBtn").onclick = ()=>{ msalApp.logoutRedirect(); };
 
 (async function init(){
   try{
     if(typeof msalApp.initialize==="function") await msalApp.initialize();
-    await msalApp.handleRedirectPromise();
-    const accts=msalApp.getAllAccounts();
-    if(accts.length){ account=accts[0]; msalApp.setActiveAccount(account); showApp(); }
+    const resp = await msalApp.handleRedirectPromise();
+    if(resp && resp.account){ account = resp.account; }
+    else { const accts = msalApp.getAllAccounts(); if(accts.length) account = accts[0]; }
+    if(account){ msalApp.setActiveAccount(account); showApp(); }
     else showSignin();
   }catch(e){
     showSignin();
