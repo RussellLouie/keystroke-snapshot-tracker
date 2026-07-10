@@ -181,6 +181,22 @@ async function graph(path, opts){
   return ct.indexOf("application/json")>=0 ? res.json() : res.text();
 }
 
+// Retry transient Excel/workbook errors (service warm-up, locks, zero-content, throttling).
+async function withRetry(fn, tries, delayMs){
+  tries = tries||4; delayMs = delayMs||2000;
+  let last;
+  for(let i=0;i<tries;i++){
+    try{ return await fn(); }
+    catch(e){
+      last=e; const m=String((e&&e.message)||"");
+      const transient=/MainContentSizeZero|CannotAcquireLock|accessConflict|Uncategorized|ServiceUnavailable|Graph (500|502|503|423|409)/i.test(m);
+      if(transient && i<tries-1){ await new Promise(r=>setTimeout(r,delayMs)); continue; }
+      throw e;
+    }
+  }
+  throw last;
+}
+
 /* Encode a sharing URL into a Graph share id (per MS docs) */
 function encodeShareUrl(url){
   const b64 = btoa(unescape(encodeURIComponent(url)));
@@ -418,7 +434,7 @@ async function onEdit(e){
   rec.status=sel.value; rec.notes=inp.value;
   sel.className="status-sel "+statusClass(rec.status);
   const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
-  try{ await saveTracking(id, rec.status, rec.notes); if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500);} renderStats(); }
+  try{ await withRetry(()=>saveTracking(id, rec.status, rec.notes)); if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500);} renderStats(); }
   catch(err){ if(badge) badge.textContent=""; showBanner("Couldn't save change: "+err.message,"err"); }
 }
 
@@ -439,20 +455,20 @@ async function loadData(){
   // 1) Read + show responses (reads work even if the workbook is open/locked elsewhere)
   try{
     if(!DRIVE_ID) await resolveWorkbook();
-    lastValues = await readResponses();
+    lastValues = await withRetry(()=>readResponses());
     tracking = {};
     buildRows(lastValues);
     render();
     $("loading").style.display="none"; $("tbl").style.display="table";
   }catch(err){
     $("loading").style.display="none";
-    showBanner("Couldn't load data: "+err.message,"err");
+    showBanner("Couldn't load data: "+err.message+" — click Reload to try again.","err");
     return;
   }
   // 2) Load shared status/notes overlay (best effort — may be locked briefly)
   try{
-    await ensureTracking();
-    await readTracking();
+    await withRetry(()=>ensureTracking());
+    await withRetry(()=>readTracking());
     buildRows(lastValues);
     render();
   }catch(e){
