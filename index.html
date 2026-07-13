@@ -50,6 +50,11 @@
   select.status-sel.s-pending{ background:#fef3c7; } select.status-sel.s-inprogress{ background:#dbeafe; } select.status-sel.s-done{ background:#dcfce7; }
   input.notes-in { width:100%; min-width:150px; padding:5px 8px; border:1px solid #e4e7ec; border-radius:7px; font:inherit; }
   .saving { font-size:11px; color:#98a2b3; }
+  .exp { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .exp-ok{ background:#f1f5f9; color:#475569; } .exp-warn{ background:#fef9c3; color:#854d0e; } .exp-over{ background:#fee2e2; color:#b91c1c; }
+  .stat.alert .n{ color:#b91c1c; }
+  .btn-del { background:#fff; color:#b91c1c; border:1px solid #fecaca; padding:5px 11px; border-radius:7px; font-size:12px; font-weight:600; }
+  .btn-del:hover{ background:#fee2e2; } .btn-del:disabled{ opacity:.6; cursor:default; }
   .empty { text-align:center; color:#98a2b3; padding:34px; }
   .foot { color:#98a2b3; font-size:12px; text-align:right; margin-top:10px; }
   #loading { text-align:center; color:#667085; padding:40px; }
@@ -100,8 +105,10 @@
           <th data-sort="priority">Priority</th>
           <th data-sort="ticket">Ticket</th>
           <th data-sort="reqNotes">Requester notes</th>
+          <th data-sort="access">Access (7d)</th>
           <th data-sort="status">Status</th>
           <th>Internal notes</th>
+          <th></th>
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
@@ -129,7 +136,11 @@ const CONFIG = {
   responseSheet: "",
   // Worksheet used to store shared status/notes (created automatically if missing):
   trackingSheet: "Tracking",
-  trackingTable: "TrackingTable"
+  trackingTable: "TrackingTable",
+  // Table that holds the form responses (used for the Delete action):
+  responseTable: "RequestsTable",
+  // Access window in days — after this many days from submission, a row is flagged for deletion:
+  accessDays: 7
 };
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["User.Read", "Files.ReadWrite.All"];
@@ -323,6 +334,23 @@ function fmt(v){
   }
   const d=new Date(v); return isNaN(d)?String(v):fmtDate(d);
 }
+function parseWhen(v){
+  if(v===null||v===undefined||v==="") return null;
+  if(typeof v==="number" || /^\d+(\.\d+)?$/.test(String(v).trim())){
+    const n=parseFloat(v); if(n>20000 && n<80000) return excelSerialToDate(n);
+  }
+  const d=new Date(v); return isNaN(d)?null:d;
+}
+// Countdown from submission date. Returns days left and an expired flag.
+function accessInfo(submitted){
+  const d=parseWhen(submitted);
+  if(!d) return { cls:"", text:"—", expired:false, daysLeft:null };
+  const deadline=new Date(d.getTime()+CONFIG.accessDays*86400000);
+  const ms=deadline.getTime()-Date.now();
+  const daysLeft=Math.ceil(ms/86400000);
+  if(ms<=0){ const over=Math.abs(daysLeft); return { cls:"exp-over", text:"Delete access"+(over>0?" ("+over+"d ago)":""), expired:true, daysLeft }; }
+  return { cls:(daysLeft<=2?"exp-warn":"exp-ok"), text:daysLeft+" day"+(daysLeft===1?"":"s")+" left", expired:false, daysLeft };
+}
 function cleanType(t){ return (t||"").replace(/[;,\s]+$/,"").trim(); }
 function typeClass(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return "t-keystroke"; if(t.indexOf("snap")>=0) return "t-snapshot"; return ""; }
 function prioClass(p){ return "p-"+(p||"").toLowerCase().replace(/[^a-z]/g,""); }
@@ -369,6 +397,7 @@ function filtered(){
     if(sortKey==="priority"){ av=pr[(av||"").toLowerCase()]||0; bv=pr[(bv||"").toLowerCase()]||0; }
     else if(sortKey==="status"){ av=st[(av||"").toLowerCase()]||0; bv=st[(bv||"").toLowerCase()]||0; }
     else if(sortKey==="submitted"){ av=new Date(av).getTime()||0; bv=new Date(bv).getTime()||0; }
+    else if(sortKey==="access"){ const ad=accessInfo(a.submitted).daysLeft, bd=accessInfo(b.submitted).daysLeft; av=(ad==null?1e9:ad); bv=(bd==null?1e9:bd); }
     else { av=(av||"").toString().toLowerCase(); bv=(bv||"").toString().toLowerCase(); }
     return av<bv?-1*sortDir:av>bv?1*sortDir:0;
   });
@@ -376,26 +405,29 @@ function filtered(){
 }
 
 function renderStats(){
-  let total=rows.length,pend=0,prog=0,done=0,keys=0,snaps=0;
+  let total=rows.length,pend=0,prog=0,done=0,keys=0,snaps=0,expired=0;
   rows.forEach(r=>{
     const s=(r.status||"").toLowerCase();
     if(s==="pending")pend++; else if(s==="in progress")prog++; else if(s==="done")done++;
     const t=(r.type||"").toLowerCase();
     if(t.indexOf("key")>=0)keys++; else if(t.indexOf("snap")>=0)snaps++;
+    if(accessInfo(r.submitted).expired) expired++;
   });
-  const s=[["Total",total],["Pending",pend],["In progress",prog],["Done",done],["Keystrokes",keys],["Snapshots",snaps]];
-  $("stats").innerHTML=s.map(x=>`<div class="stat"><div class="n">${x[1]}</div><div class="l">${x[0]}</div></div>`).join("");
+  const s=[["Total",total,0],["Pending",pend,0],["In progress",prog,0],["Done",done,0],["Keystrokes",keys,0],["Snapshots",snaps,0],["To delete",expired,1]];
+  $("stats").innerHTML=s.map(x=>`<div class="stat${x[2]&&x[1]>0?" alert":""}"><div class="n">${x[1]}</div><div class="l">${x[0]}</div></div>`).join("");
 }
 
 function render(){
   renderStats();
   const list=filtered(), tb=$("tbody");
-  if(!list.length){ tb.innerHTML=`<tr><td colspan="9" class="empty">No requests match.</td></tr>`; }
+  if(!list.length){ tb.innerHTML=`<tr><td colspan="11" class="empty">No requests match.</td></tr>`; }
   else {
     tb.innerHTML=list.map(r=>{
       const ticket = (r.ticketRaised||"").toString().toLowerCase().indexOf("yes")>=0
         ? `<span class="yes">${esc(r.ticketId||"Yes")}</span>` : `<span class="no">—</span>`;
       const opts=["Pending","In progress","Done"].map(o=>`<option${o===r.status?" selected":""}>${o}</option>`).join("");
+      const ai=accessInfo(r.submitted);
+      const accessCell=`<span class="exp ${ai.cls}"${ai.expired?' title="The 7-day access window has elapsed — revoke/delete this access."':""}>${esc(ai.text)}</span>`;
       return `<tr data-id="${esc(r.id)}">
         <td>${esc(fmt(r.submitted))}</td>
         <td>${esc(r.requester)}</td>
@@ -404,8 +436,10 @@ function render(){
         <td>${r.priority?`<span class="pill ${prioClass(r.priority)}">${esc(r.priority)}</span>`:""}</td>
         <td>${ticket}</td>
         <td class="content">${r.reqNotes?esc(r.reqNotes):'<span class="muted">—</span>'}</td>
+        <td>${accessCell}</td>
         <td><select class="status-sel ${statusClass(r.status)}" data-act="status">${opts}</select></td>
         <td><input class="notes-in" data-act="notes" value="${esc(r.notes)}" placeholder="Add note…"> <span class="saving" data-role="save"></span></td>
+        <td><button class="btn-del" data-act="delete" title="Delete this request permanently">Delete</button></td>
       </tr>`;
     }).join("");
   }
@@ -422,6 +456,7 @@ function wire(){
   });
   $("tbody").addEventListener("change", onEdit);
   $("tbody").addEventListener("blur", onEdit, true);
+  $("tbody").addEventListener("click", onDelete);
   $("reloadBtn").onclick=loadData;
   $("exportBtn").onclick=exportCsv;
 }
@@ -436,6 +471,36 @@ async function onEdit(e){
   const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
   try{ await withRetry(()=>saveTracking(id, rec.status, rec.notes)); if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500);} renderStats(); }
   catch(err){ if(badge) badge.textContent=""; showBanner("Couldn't save change: "+err.message,"err"); }
+}
+
+/* Locate the row in the responses table by its Forms ID, then delete it. */
+async function deleteRequest(id){
+  const rr = await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/rows?$select=index,values");
+  const match = (rr.value||[]).find(rw => ((rw.values && rw.values[0] && rw.values[0][0])||"").toString() === id);
+  if(!match) throw new Error("This request wasn't found in the workbook (it may already have been removed). Click Reload.");
+  await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/rows/itemAt(index="+match.index+")",{method:"DELETE"});
+  // Best-effort: clear any shared status/notes entry for this request.
+  try{
+    const tr=tracking[id];
+    if(tr && typeof tr.rowIndex==="number"){
+      await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+tr.rowIndex+")",{method:"DELETE"});
+    }
+  }catch(e){ /* orphaned tracking rows are harmless */ }
+}
+async function onDelete(e){
+  const btn=e.target.closest('[data-act="delete"]'); if(!btn) return;
+  const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
+  const rec=rows.find(x=>x.id===id);
+  const label=rec ? (rec.requester||rec.content||("request "+id)) : ("request "+id);
+  if(!confirm("Delete this request permanently?\n\n"+label+"\n\nThis removes it from the workbook and can't be undone.")) return;
+  btn.textContent="Deleting…"; btn.disabled=true;
+  try{
+    await withRetry(()=>deleteRequest(id));
+    await loadData();
+  }catch(err){
+    btn.textContent="Delete"; btn.disabled=false;
+    showBanner("Couldn't delete: "+err.message,"err");
+  }
 }
 
 function exportCsv(){
