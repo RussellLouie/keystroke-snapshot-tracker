@@ -192,8 +192,8 @@
           <p class="sub">Requested keystrokes &amp; snapshots · submissions from the Microsoft Form, shared status &amp; notes across IT.</p>
         </div>
         <div class="right">
-          <button class="btn-ghost" id="copyLinkBtn" title="Copy the source workbook link">🔗 Copy sheet link</button>
-          <button class="btn-ghost" id="emailLinkBtn" title="Email the source workbook link">✉ Email link</button>
+          <button class="btn-ghost" id="copyLinkBtn" title="Copy the request form link">🔗 Copy form link</button>
+          <button class="btn-ghost" id="emailLinkBtn" title="Email the request form link">✉ Email form</button>
           <button class="btn-ghost" id="reloadBtn">↻ Reload</button>
         </div>
       </header>
@@ -265,7 +265,9 @@ const CONFIG = {
   // Access window in days — after this many days from submission, a row is flagged for deletion:
   accessDays: 7,
   // IT staff who can be assigned as the owner of a request (edit this list to add/remove people):
-  owners: ["Clint Gallentes","Olem Babia","Rudy Maneja","Russell Louie Bual"]
+  owners: ["Clint Gallentes","Olem Babia","Rudy Maneja","Russell Louie Bual"],
+  // Public Microsoft Form people fill out to submit a request (shared by the Copy/Email buttons):
+  formUrl: "https://forms.office.com/Pages/ResponsePage.aspx?id=eaHfI7KW9kCr1H_qMX8K9h532BI61vJPiBflncnicytUNlpQOVo0NUw4TVFRTUQxVjkxR0ZLSDg3SyQlQCN0PWcu"
 };
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["User.Read", "Files.ReadWrite.All"];
@@ -690,10 +692,7 @@ async function onRevoke(e){
 /* ---- Source workbook link (copy / email) ---- */
 let SHEET_URL="";
 async function getSheetUrl(){
-  if(SHEET_URL) return SHEET_URL;
-  if(!DRIVE_ID) await resolveWorkbook();
-  const di = await graph(itemBase()+"?$select=webUrl");
-  SHEET_URL = di.webUrl || "";
+  SHEET_URL = CONFIG.formUrl || "";
   return SHEET_URL;
 }
 async function copySheetLink(btn){
@@ -706,14 +705,41 @@ async function copySheetLink(btn){
     showBanner("Sheet link (copy manually): "+(SHEET_URL||""), "info");
   }
 }
+/* Secure send queue: the dashboard drops a row into an "Outbox" table; a Power
+   Automate flow emails the form link from teramind.alerts@go.team, then clears it. */
+const OUTBOX_SHEET="Outbox", OUTBOX_TABLE="OutboxTable";
+async function ensureOutbox(){
+  try{ await graph(itemBase()+"/workbook/tables/"+OUTBOX_TABLE+"?$select=name"); return; }
+  catch(e){ /* create below */ }
+  const sheets = await listSheets();
+  if(sheets.indexOf(OUTBOX_SHEET)<0){
+    await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:OUTBOX_SHEET})});
+  }
+  await graph(itemBase()+"/workbook/worksheets('"+OUTBOX_SHEET+"')/range(address='A1:E1')",
+    {method:"PATCH",body:JSON.stringify({values:[["Id","To","FormUrl","RequestedBy","RequestedAt"]]})});
+  await graph(itemBase()+"/workbook/tables/add",
+    {method:"POST",body:JSON.stringify({address:OUTBOX_SHEET+"!A1:E1",hasHeaders:true})});
+  const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
+  const t = tbls.value[tbls.value.length-1];
+  await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:OUTBOX_TABLE})});
+}
 async function emailSheetLink(){
+  const url = CONFIG.formUrl || "";
+  if(!url){ showBanner("No request-form URL is configured.","err"); return; }
+  const to = prompt("Send the request form link to which email address?");
+  if(to===null) return;                       // cancelled
+  const addr = to.trim();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)){ showBanner("\""+addr+"\" doesn't look like a valid email address.","err"); return; }
+  showBanner("Queuing the form link for "+addr+"…","info");
   try{
-    const url = await getSheetUrl();
-    if(!url){ showBanner("Couldn't get the sheet link — click Reload and try again.","err"); return; }
-    const subject = encodeURIComponent("GoTeam Access Request Center — source sheet");
-    const body = encodeURIComponent("Here is the link to the Access Requests source workbook:\n\n"+url+"\n\n(You'll need access to the IT Operations SharePoint site to open it.)");
-    window.location.href = "mailto:?subject="+subject+"&body="+body;
-  }catch(e){ showBanner("Couldn't prepare the email: "+e.message,"err"); }
+    if(!DRIVE_ID) await resolveWorkbook();
+    await withRetry(()=>ensureOutbox());
+    const id = (window.crypto&&crypto.randomUUID) ? crypto.randomUUID() : ("ob"+Date.now());
+    const who = (account && (account.name||account.username)) || "";
+    await withRetry(()=>graph(itemBase()+"/workbook/tables/"+OUTBOX_TABLE+"/rows/add",
+      {method:"POST",body:JSON.stringify({values:[[id, addr, url, who, new Date().toISOString()]]})}));
+    showBanner("Queued — teramind.alerts@go.team will email the form link to "+addr+" shortly.","info");
+  }catch(e){ showBanner("Couldn't queue the email: "+((e&&e.message)||e),"err"); }
 }
 
 function exportCsv(){
