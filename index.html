@@ -192,6 +192,8 @@
           <p class="sub">Requested keystrokes &amp; snapshots · submissions from the Microsoft Form, shared status &amp; notes across IT.</p>
         </div>
         <div class="right">
+          <button class="btn-ghost" id="copyLinkBtn" title="Copy the source workbook link">🔗 Copy sheet link</button>
+          <button class="btn-ghost" id="emailLinkBtn" title="Email the source workbook link">✉ Email link</button>
           <button class="btn-ghost" id="reloadBtn">↻ Reload</button>
         </div>
       </header>
@@ -632,6 +634,8 @@ function wire(){
   $("tbody").addEventListener("click", onRevoke);
   $("reloadBtn").onclick=loadData;
   $("exportBtn").onclick=exportCsv;
+  $("copyLinkBtn").onclick=(e)=>copySheetLink(e.currentTarget);
+  $("emailLinkBtn").onclick=emailSheetLink;
 }
 async function onEdit(e){
   const act=e.target.getAttribute("data-act"); if(!act || act==="revoke") return;
@@ -681,6 +685,35 @@ async function onRevoke(e){
     btn.textContent="Revoke"; btn.disabled=false;
     showBanner("Couldn't revoke: "+err.message,"err");
   }
+}
+
+/* ---- Source workbook link (copy / email) ---- */
+let SHEET_URL="";
+async function getSheetUrl(){
+  if(SHEET_URL) return SHEET_URL;
+  if(!DRIVE_ID) await resolveWorkbook();
+  const di = await graph(itemBase()+"?$select=webUrl");
+  SHEET_URL = di.webUrl || "";
+  return SHEET_URL;
+}
+async function copySheetLink(btn){
+  try{
+    const url = await getSheetUrl();
+    if(!url){ showBanner("Couldn't get the sheet link — click Reload and try again.","err"); return; }
+    await navigator.clipboard.writeText(url);
+    const old=btn.textContent; btn.textContent="✓ Copied!"; setTimeout(()=>btn.textContent=old,1600);
+  }catch(e){
+    showBanner("Sheet link (copy manually): "+(SHEET_URL||""), "info");
+  }
+}
+async function emailSheetLink(){
+  try{
+    const url = await getSheetUrl();
+    if(!url){ showBanner("Couldn't get the sheet link — click Reload and try again.","err"); return; }
+    const subject = encodeURIComponent("GoTeam Access Request Center — source sheet");
+    const body = encodeURIComponent("Here is the link to the Access Requests source workbook:\n\n"+url+"\n\n(You'll need access to the IT Operations SharePoint site to open it.)");
+    window.location.href = "mailto:?subject="+subject+"&body="+body;
+  }catch(e){ showBanner("Couldn't prepare the email: "+e.message,"err"); }
 }
 
 function exportCsv(){
