@@ -644,6 +644,7 @@ async function onEdit(e){
   const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
   try{
     await withRetry(()=>saveTracking(id, rec.status, rec.notes, rec.owner));
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.owner=t.owner; }
     if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500); }
     render();
   }
@@ -674,6 +675,7 @@ async function onRevoke(e){
   try{
     rec.status="Revoked";
     await withRetry(()=>saveTracking(id, rec.status, rec.notes, rec.owner));
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; }
     render();
   }catch(err){
     btn.textContent="Revoke"; btn.disabled=false;
