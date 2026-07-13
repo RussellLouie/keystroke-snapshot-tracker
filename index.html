@@ -7,7 +7,7 @@
 <style>
   :root{
     color-scheme: light;
-    --navy:#0f1f44; --navy2:#0a1530; --brand:#1d6ff2; --brand-dark:#1559cc;
+    --navy:#0d1a3a; --navy2:#070f26; --brand:#1560f6; --brand-dark:#1149c8;
     --bg:#eef2f8; --card:#ffffff; --line:#e5e9f0; --line2:#eef1f6;
     --text:#141c2e; --muted:#697488; --muted2:#8a93a6;
   }
@@ -29,7 +29,8 @@
     box-shadow:0 24px 60px rgba(6,15,40,.35); }
   .brand-badge{ width:52px; height:52px; border-radius:14px; margin:0 auto 18px; display:flex; align-items:center; justify-content:center;
     background:linear-gradient(135deg,var(--brand),#0b3fa0); color:#fff; font-weight:800; font-size:22px; letter-spacing:-1px;
-    box-shadow:0 8px 20px rgba(29,111,242,.4); }
+    box-shadow:0 8px 20px rgba(21,96,246,.4); }
+  .signin-logo{ height:46px; width:auto; margin:0 auto 22px; display:block; }
   .signin-card h1{ font-size:21px; margin:0 0 6px; }
   .signin-card p{ color:var(--muted); margin:0 0 24px; font-size:13.5px; }
   .signin-card .btn-primary{ width:100%; padding:12px; font-size:15px; }
@@ -39,7 +40,9 @@
   #app-view{ display:none; min-height:100vh; }
   .sidebar{ width:248px; flex:0 0 248px; background:linear-gradient(180deg,var(--navy) 0%,var(--navy2) 100%);
     color:#c7d0e2; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
-  .sb-brand{ display:flex; align-items:center; gap:11px; padding:20px 20px 18px; }
+  .sb-brand{ display:flex; flex-direction:column; align-items:flex-start; gap:7px; padding:22px 20px 16px; }
+  .sb-logo{ height:27px; width:auto; }
+  .sb-brand-sub{ color:#8ea0c4; font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; }
   .sb-badge{ width:38px; height:38px; border-radius:11px; display:flex; align-items:center; justify-content:center;
     background:linear-gradient(135deg,var(--brand),#0b3fa0); color:#fff; font-weight:800; font-size:17px; letter-spacing:-1px; }
   .sb-brand .t1{ color:#fff; font-weight:700; font-size:15px; line-height:1.1; }
@@ -48,7 +51,7 @@
   .sb-cap{ color:#6c7da3; font-size:10.5px; text-transform:uppercase; letter-spacing:.09em; padding:14px 10px 6px; }
   .sb-item{ display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:9px; color:#c7d0e2; font-weight:500; font-size:13.5px; cursor:default; }
   .sb-item svg{ width:17px; height:17px; opacity:.85; }
-  .sb-item.active{ background:rgba(29,111,242,.18); color:#fff; box-shadow:inset 0 0 0 1px rgba(120,160,255,.18); }
+  .sb-item.active{ background:rgba(21,96,246,.18); color:#fff; box-shadow:inset 0 0 0 1px rgba(120,160,255,.18); }
   .sb-item.active svg{ opacity:1; }
   .sb-foot{ margin-top:auto; padding:14px; border-top:1px solid rgba(255,255,255,.08); display:flex; align-items:center; gap:10px; }
   .avatar{ width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#2c58b0,#1d6ff2); color:#fff;
@@ -93,7 +96,7 @@
   .search-wrap{ position:relative; flex:1; min-width:200px; }
   .search-wrap svg{ position:absolute; left:12px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:var(--muted2); }
   .toolbar input.search{ width:100%; padding:9px 12px 9px 34px; border:1px solid var(--line); border-radius:9px; background:#fff; font:inherit; }
-  .toolbar input.search:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(29,111,242,.13); }
+  .toolbar input.search:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(21,96,246,.13); }
   .toolbar select{ padding:9px 11px; border:1px solid var(--line); border-radius:9px; background:#fff; font:inherit; color:#33405a; }
   .toolbar select:focus{ outline:none; border-color:var(--brand); }
   .spacer{ flex:1; }
@@ -116,7 +119,7 @@
   select.status-sel.s-pending{ background:#fef3c7; }
   select.status-sel.s-inprogress{ background:#e0edff; } select.status-sel.s-done{ background:#dcfce7; }
   input.notes-in{ width:100%; min-width:150px; padding:7px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; }
-  input.notes-in:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(29,111,242,.12); }
+  input.notes-in:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(21,96,246,.12); }
   .saving{ font-size:11px; color:var(--muted2); }
   .exp{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
   .exp-ok{ background:#eef1f6; color:#516079; } .exp-warn{ background:#fef3c7; color:#92600e; } .exp-over{ background:#fee2e2; color:#b42318; }
@@ -141,7 +144,7 @@
   <!-- ============ SIGN IN ============ -->
   <div id="signin-view">
     <div class="signin-card">
-      <div class="brand-badge">G</div>
+      <img class="signin-logo" src="https://go.team/wp-content/uploads/2022/05/GoTeam-AI-Powered-People-Logo-Dark-1.png" alt="GoTeam">
       <h1>Access Request Center</h1>
       <p>Sign in with your GoTeam Microsoft account to view and manage requested keystrokes and snapshots.</p>
       <button class="btn-primary" id="signinBtn">Sign in with Microsoft</button>
@@ -154,11 +157,8 @@
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="sb-brand">
-        <div class="sb-badge">G</div>
-        <div>
-          <div class="t1">GoTeam</div>
-          <div class="t2">Request Center</div>
-        </div>
+        <img class="sb-logo" src="https://go.team/wp-content/uploads/2022/05/goteam-logo-light-1024x298.png" alt="GoTeam">
+        <div class="sb-brand-sub">Request Center</div>
       </div>
       <nav class="sb-nav">
         <div class="sb-cap">Workspace</div>
