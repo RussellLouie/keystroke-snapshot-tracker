@@ -124,6 +124,7 @@
   .saving{ font-size:11px; color:var(--muted2); }
   .exp{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
   .exp-ok{ background:#eef1f6; color:#516079; } .exp-warn{ background:#fef3c7; color:#92600e; } .exp-over{ background:#fee2e2; color:#b42318; }
+  .exp-await{ background:#e8f0ff; color:#2f5bb0; }
   .btn-del{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; }
   .btn-del:hover{ background:#fef2f2; } .btn-del:disabled{ opacity:.55; cursor:default; }
   select.owner-sel{ padding:6px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; color:#33405a; max-width:150px; }
@@ -409,23 +410,23 @@ async function ensureTracking(){
     if(sheets.indexOf(CONFIG.trackingSheet)<0){
       await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:CONFIG.trackingSheet})});
     }
-    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt
-    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:F1')",
-      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt"]]})});
+    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content
+    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:I1')",
+      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content"]]})});
     await graph(itemBase()+"/workbook/tables/add",
-      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:F1",hasHeaders:true})});
+      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:I1",hasHeaders:true})});
     const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
     const t = tbls.value[tbls.value.length-1];
     await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
     return;
   }
-  // Table exists — make sure the newer "Owner" column is present (migrate older 5-column tables).
+  // Table exists — ensure newer columns are present (migrate older tables).
   try{
     const cols = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns?$select=name");
-    const names = (cols.value||[]).map(c=>c.name);
-    if(names.indexOf("Owner")<0){
-      await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",
-        {method:"POST",body:JSON.stringify({name:"Owner",index:3})});
+    let names = (cols.value||[]).map(c=>c.name);
+    if(names.indexOf("Owner")<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:"Owner",index:3})}); names.push("Owner"); }
+    for(const col of ["DoneAt","Requester","Content"]){
+      if(names.indexOf(col)<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:col})}); names.push(col); }
     }
   }catch(e){ /* column check best-effort */ }
 }
@@ -436,25 +437,30 @@ async function readTracking(){
     const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange?$select=values");
     (r.values||[]).forEach((row,i)=>{
       const id=(row[0]||"").toString();
-      if(id) tracking[id]={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", rowIndex:i };
+      if(id) tracking[id]={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", rowIndex:i };
     });
   } catch(e){ /* table empty or missing rows -> ignore */ }
 }
 
-async function saveTracking(id, status, notes, owner){
+async function saveTracking(rec){
+  const id=rec.id, status=rec.status||"Pending", notes=rec.notes||"", owner=rec.owner||"";
+  const requester=rec.requester||"", content=rec.content||"";
   const who = (account && (account.name||account.username)) || "";
   const when = new Date().toISOString();
-  owner = owner || "";
   const existing = tracking[id];
-  const vals = [[id, status, notes, owner, who, when]];
+  // DoneAt = when the request was marked Done (starts the 7-day access timer).
+  // Set on the transition into Done; kept while Done; cleared when it leaves Done.
+  let doneAt = existing ? (existing.doneAt||"") : "";
+  if((status||"").toLowerCase()==="done"){ if(!doneAt) doneAt = when; } else { doneAt = ""; }
+  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content]];
   if(existing && typeof existing.rowIndex==="number"){
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+existing.rowIndex+")",
       {method:"PATCH",body:JSON.stringify({values:vals})});
-    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when});
+    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content});
   } else {
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/add",
       {method:"POST",body:JSON.stringify({values:vals})});
-    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, rowIndex:Object.keys(tracking).length };
+    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, rowIndex:Object.keys(tracking).length };
   }
 }
 
@@ -479,10 +485,12 @@ function parseWhen(v){
   }
   const d=new Date(v); return isNaN(d)?null:d;
 }
-// Countdown from submission date. Returns days left and an expired flag.
-function accessInfo(submitted){
-  const d=parseWhen(submitted);
-  if(!d) return { cls:"", text:"—", expired:false, daysLeft:null };
+// Countdown starts when the request is marked Done (access granted). Before that: "Awaiting grant".
+function accessInfo(r){
+  const st=((r&&r.status)||"").toLowerCase();
+  if(st!=="done") return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
+  const d=parseWhen(r.doneAt) || parseWhen(r.updatedAt);   // updatedAt = fallback for legacy Done rows
+  if(!d) return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
   const deadline=new Date(d.getTime()+CONFIG.accessDays*86400000);
   const ms=deadline.getTime()-Date.now();
   const daysLeft=Math.ceil(ms/86400000);
@@ -518,7 +526,8 @@ function buildRows(values){
       notes: track.notes || "",
       owner: track.owner || "",
       updatedBy: track.updatedBy || "",
-      updatedAt: track.updatedAt || ""
+      updatedAt: track.updatedAt || "",
+      doneAt: track.doneAt || ""
     });
   }
 }
@@ -541,7 +550,7 @@ function filtered(){
     if(sortKey==="priority"){ av=pr[(av||"").toLowerCase()]||0; bv=pr[(bv||"").toLowerCase()]||0; }
     else if(sortKey==="status"){ av=st[(av||"").toLowerCase()]||0; bv=st[(bv||"").toLowerCase()]||0; }
     else if(sortKey==="submitted"){ av=new Date(av).getTime()||0; bv=new Date(bv).getTime()||0; }
-    else if(sortKey==="access"){ const ad=accessInfo(a.submitted).daysLeft, bd=accessInfo(b.submitted).daysLeft; av=(ad==null?1e9:ad); bv=(bd==null?1e9:bd); }
+    else if(sortKey==="access"){ const ad=accessInfo(a).daysLeft, bd=accessInfo(b).daysLeft; av=(ad==null?1e9:ad); bv=(bd==null?1e9:bd); }
     else if(sortKey==="updatedAt"){ av=new Date(av).getTime()||0; bv=new Date(bv).getTime()||0; }
     else { av=(av||"").toString().toLowerCase(); bv=(bv||"").toString().toLowerCase(); }
     return av<bv?-1*sortDir:av>bv?1*sortDir:0;
@@ -568,7 +577,7 @@ function renderStats(){
     if(s==="pending")pend++; else if(s==="in progress")prog++; else if(s==="done")done++;
     const t=(r.type||"").toLowerCase();
     if(t.indexOf("key")>=0)keys++; if(t.indexOf("snap")>=0)snaps++; if(t.indexOf("video")>=0)vids++;
-    if(accessInfo(r.submitted).expired) expired++;
+    if(accessInfo(r).expired) expired++;
   });
   const cards=[
     {k:"total",label:"Active requests",v:total},
@@ -599,8 +608,10 @@ function render(){
       const opts=["Pending","In progress","Done","Revoked"].map(o=>`<option${o===r.status?" selected":""}>${o}</option>`).join("");
       const ownerOpts=`<option value=""${r.owner?"":" selected"}>Unassigned</option>`+
         (CONFIG.owners||[]).map(o=>`<option${o===r.owner?" selected":""}>${esc(o)}</option>`).join("");
-      const ai=accessInfo(r.submitted);
-      const accessCell=`<span class="exp ${ai.cls}"${ai.expired?' title="The 7-day access window has elapsed — revoke this access."':""}>${esc(ai.text)}</span>`;
+      const ai=accessInfo(r);
+      const aiTitle = ai.expired ? ' title="The 7-day access window has elapsed — revoke this access."'
+        : (ai.cls==="exp-await" ? ' title="The 7-day countdown starts once this request is marked Done."' : "");
+      const accessCell=`<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=(r.status||"").toLowerCase()==="revoked";
       const actionCell = isRevoked
@@ -652,8 +663,8 @@ async function onEdit(e){
   if(own) rec.owner=own.value;
   const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
   try{
-    await withRetry(()=>saveTracking(id, rec.status, rec.notes, rec.owner));
-    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.owner=t.owner; }
+    await withRetry(()=>saveTracking(rec));
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.owner=t.owner; rec.doneAt=t.doneAt; }
     if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500); }
     render();
   }
@@ -683,8 +694,8 @@ async function onRevoke(e){
   btn.textContent="Revoking…"; btn.disabled=true;
   try{
     rec.status="Revoked";
-    await withRetry(()=>saveTracking(id, rec.status, rec.notes, rec.owner));
-    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; }
+    await withRetry(()=>saveTracking(rec));
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.doneAt=t.doneAt; }
     render();
   }catch(err){
     btn.textContent="Revoke"; btn.disabled=false;
