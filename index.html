@@ -85,6 +85,7 @@
   .s-done .stat-dot{ background:#dcfce7; color:#15803d; }
   .s-keys .stat-dot{ background:#eef2ff; color:#4338ca; }
   .s-snaps .stat-dot{ background:#d9f7ee; color:#0f766e; }
+  .s-videos .stat-dot{ background:#fce7f3; color:#be1858; }
   .s-delete .stat-dot{ background:#f1f4f9; color:#8a93a6; }
   .stat.alert{ border-color:#fecdca; background:#fffafa; }
   .stat.alert .stat-dot{ background:#fee2e2; color:#d92d20; }
@@ -112,7 +113,7 @@
   td.content{ max-width:260px; color:#33405a; }
   .muted{ color:var(--muted2); }
   .pill{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
-  .t-keystroke{ background:#eef2ff; color:#4338ca; } .t-snapshot{ background:#d9f7ee; color:#0f766e; }
+  .t-keystroke{ background:#eef2ff; color:#4338ca; } .t-snapshot{ background:#d9f7ee; color:#0f766e; } .t-video{ background:#fce7f3; color:#be1858; }
   .p-high{ background:#fee2e2; color:#b42318; } .p-medium{ background:#fef3c7; color:#92600e; } .p-low{ background:#eef1f6; color:#516079; }
   .yes{ color:#0f766e; font-weight:600; } .no{ color:var(--muted2); }
   select.status-sel{ padding:6px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; font-weight:600; color:#33405a; }
@@ -208,7 +209,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               <input class="search" id="search" placeholder="Search requester, content, notes…">
             </div>
-            <select id="fType"><option value="">All types</option><option>Keystroke</option><option>Snapshot</option></select>
+            <select id="fType"><option value="">All types</option><option>Keystroke</option><option>Snapshot</option><option>Video Playback</option></select>
             <select id="fStatus"><option value="">All statuses</option><option>Pending</option><option>In progress</option><option>Done</option><option>Revoked</option></select>
             <select id="fPriority"><option value="">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select>
             <div class="spacer"></div>
@@ -489,7 +490,7 @@ function accessInfo(submitted){
   return { cls:(daysLeft<=2?"exp-warn":"exp-ok"), text:daysLeft+" day"+(daysLeft===1?"":"s")+" left", expired:false, daysLeft };
 }
 function cleanType(t){ return (t||"").replace(/[;,\s]+$/,"").trim(); }
-function typeClass(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return "t-keystroke"; if(t.indexOf("snap")>=0) return "t-snapshot"; return ""; }
+function typeClass(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return "t-keystroke"; if(t.indexOf("snap")>=0) return "t-snapshot"; if(t.indexOf("video")>=0) return "t-video"; return ""; }
 function prioClass(p){ return "p-"+(p||"").toLowerCase().replace(/[^a-z]/g,""); }
 function statusClass(s){ return "s-"+(s||"").toLowerCase().replace(/[^a-z]/g,""); }
 
@@ -529,7 +530,7 @@ function filtered(){
     // Hide revoked rows unless the user explicitly filters to "Revoked".
     if(!fs){ if(st==="revoked") return false; }
     else if(st!==fs.toLowerCase()) return false;
-    if(ft){ const a=(r.type||"").toLowerCase(); const key=ft.toLowerCase().indexOf("key")>=0?"key":"snap"; if(a.indexOf(key)<0) return false; }
+    if(ft){ const a=(r.type||"").toLowerCase(); const f=ft.toLowerCase(); const key=f.indexOf("key")>=0?"key":f.indexOf("snap")>=0?"snap":"video"; if(a.indexOf(key)<0) return false; }
     if(fp && (r.priority||"").toLowerCase()!==fp.toLowerCase()) return false;
     if(q){ const hay=(r.requester+" "+r.content+" "+r.reqNotes+" "+r.notes+" "+r.ticketId+" "+r.owner+" "+r.updatedBy).toLowerCase(); if(hay.indexOf(q)<0) return false; }
     return true;
@@ -555,17 +556,18 @@ const STAT_ICONS = {
   done:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
   keys:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>',
   snaps:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+  videos:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>',
   delete:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>'
 };
 function renderStats(){
-  let total=0,pend=0,prog=0,done=0,keys=0,snaps=0,expired=0,revoked=0;
+  let total=0,pend=0,prog=0,done=0,keys=0,snaps=0,vids=0,expired=0,revoked=0;
   rows.forEach(r=>{
     const s=(r.status||"").toLowerCase();
     if(s==="revoked"){ revoked++; return; }   // revoked = archived, excluded from active stats
     total++;
     if(s==="pending")pend++; else if(s==="in progress")prog++; else if(s==="done")done++;
     const t=(r.type||"").toLowerCase();
-    if(t.indexOf("key")>=0)keys++; else if(t.indexOf("snap")>=0)snaps++;
+    if(t.indexOf("key")>=0)keys++; if(t.indexOf("snap")>=0)snaps++; if(t.indexOf("video")>=0)vids++;
     if(accessInfo(r.submitted).expired) expired++;
   });
   const cards=[
@@ -575,6 +577,7 @@ function renderStats(){
     {k:"done",label:"Done",v:done},
     {k:"keys",label:"Keystrokes",v:keys},
     {k:"snaps",label:"Snapshots",v:snaps},
+    {k:"videos",label:"Videos",v:vids},
     {k:"delete",label:"To delete",v:expired,alert:true},
     {k:"revoked",label:"Revoked",v:revoked}
   ];
