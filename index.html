@@ -410,11 +410,11 @@ async function ensureTracking(){
     if(sheets.indexOf(CONFIG.trackingSheet)<0){
       await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:CONFIG.trackingSheet})});
     }
-    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content
-    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:I1')",
-      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content"]]})});
+    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content | AccessDays
+    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:J1')",
+      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content","AccessDays"]]})});
     await graph(itemBase()+"/workbook/tables/add",
-      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:I1",hasHeaders:true})});
+      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:J1",hasHeaders:true})});
     const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
     const t = tbls.value[tbls.value.length-1];
     await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
@@ -425,7 +425,7 @@ async function ensureTracking(){
     const cols = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns?$select=name");
     let names = (cols.value||[]).map(c=>c.name);
     if(names.indexOf("Owner")<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:"Owner",index:3})}); names.push("Owner"); }
-    for(const col of ["DoneAt","Requester","Content"]){
+    for(const col of ["DoneAt","Requester","Content","AccessDays"]){
       if(names.indexOf(col)<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:col})}); names.push(col); }
     }
   }catch(e){ /* column check best-effort */ }
@@ -437,7 +437,7 @@ async function readTracking(){
     const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange?$select=values");
     (r.values||[]).forEach((row,i)=>{
       const id=(row[0]||"").toString();
-      if(id) tracking[id]={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", rowIndex:i };
+      if(id) tracking[id]={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", accessDays:(row[9]==null?"":row[9]), rowIndex:i };
     });
   } catch(e){ /* table empty or missing rows -> ignore */ }
 }
@@ -452,15 +452,18 @@ async function saveTracking(rec){
   // Set on the transition into Done; kept while Done; cleared when it leaves Done.
   let doneAt = existing ? (existing.doneAt||"") : "";
   if((status||"").toLowerCase()==="done"){ if(!doneAt) doneAt = when; } else { doneAt = ""; }
-  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content]];
+  // AccessDays = per-request override for the countdown window (blank = use CONFIG.accessDays).
+  let accessDays = existing ? (existing.accessDays==null?"":existing.accessDays) : "";
+  if(rec.accessDays!=null && rec.accessDays!=="") accessDays = rec.accessDays;
+  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content, accessDays]];
   if(existing && typeof existing.rowIndex==="number"){
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+existing.rowIndex+")",
       {method:"PATCH",body:JSON.stringify({values:vals})});
-    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content});
+    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content,accessDays});
   } else {
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/add",
       {method:"POST",body:JSON.stringify({values:vals})});
-    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, rowIndex:Object.keys(tracking).length };
+    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, accessDays, rowIndex:Object.keys(tracking).length };
   }
 }
 
@@ -491,7 +494,10 @@ function accessInfo(r){
   if(st!=="done") return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
   const d=parseWhen(r.doneAt) || parseWhen(r.updatedAt);   // updatedAt = fallback for legacy Done rows
   if(!d) return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
-  const deadline=new Date(d.getTime()+CONFIG.accessDays*86400000);
+  // Per-request window override (AccessDays); blank/invalid falls back to the global default.
+  const ovr = (r && r.accessDays!=null && String(r.accessDays).trim()!=="") ? Number(r.accessDays) : NaN;
+  const days = (!isNaN(ovr) && ovr>0) ? ovr : CONFIG.accessDays;
+  const deadline=new Date(d.getTime()+days*86400000);
   const ms=deadline.getTime()-Date.now();
   const daysLeft=Math.ceil(ms/86400000);
   if(ms<=0){ const over=Math.abs(daysLeft); return { cls:"exp-over", text:"Delete access"+(over>0?" ("+over+"d ago)":""), expired:true, daysLeft }; }
@@ -527,7 +533,8 @@ function buildRows(values){
       owner: track.owner || "",
       updatedBy: track.updatedBy || "",
       updatedAt: track.updatedAt || "",
-      doneAt: track.doneAt || ""
+      doneAt: track.doneAt || "",
+      accessDays: (track.accessDays==null?"":track.accessDays)
     });
   }
 }
@@ -664,7 +671,7 @@ async function onEdit(e){
   const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
   try{
     await withRetry(()=>saveTracking(rec));
-    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.owner=t.owner; rec.doneAt=t.doneAt; }
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.owner=t.owner; rec.doneAt=t.doneAt; rec.accessDays=t.accessDays; }
     if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500); }
     render();
   }
@@ -695,7 +702,7 @@ async function onRevoke(e){
   try{
     rec.status="Revoked";
     await withRetry(()=>saveTracking(rec));
-    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.doneAt=t.doneAt; }
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.doneAt=t.doneAt; rec.accessDays=t.accessDays; }
     render();
   }catch(err){
     btn.textContent="Revoke"; btn.disabled=false;
