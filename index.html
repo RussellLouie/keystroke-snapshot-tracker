@@ -414,11 +414,11 @@ async function ensureTracking(){
     if(sheets.indexOf(CONFIG.trackingSheet)<0){
       await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:CONFIG.trackingSheet})});
     }
-    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content | AccessDays | Submitted
-    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:K1')",
-      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content","AccessDays","Submitted"]]})});
+    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content | AccessDays | Submitted | SubmitMinLocal
+    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:L1')",
+      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content","AccessDays","Submitted","SubmitMinLocal"]]})});
     await graph(itemBase()+"/workbook/tables/add",
-      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:K1",hasHeaders:true})});
+      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:L1",hasHeaders:true})});
     const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
     const t = tbls.value[tbls.value.length-1];
     await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
@@ -429,7 +429,7 @@ async function ensureTracking(){
     const cols = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns?$select=name");
     let names = (cols.value||[]).map(c=>c.name);
     if(names.indexOf("Owner")<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:"Owner",index:3})}); names.push("Owner"); }
-    for(const col of ["DoneAt","Requester","Content","AccessDays","Submitted"]){
+    for(const col of ["DoneAt","Requester","Content","AccessDays","Submitted","SubmitMinLocal"]){
       if(names.indexOf(col)<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:col})}); names.push(col); }
     }
   }catch(e){ /* column check best-effort */ }
@@ -471,19 +471,23 @@ async function saveTracking(rec){
   // AccessDays = per-request override for the countdown window (blank = use CONFIG.accessDays).
   let accessDays = existing ? (existing.accessDays==null?"":existing.accessDays) : "";
   if(rec.accessDays!=null && rec.accessDays!=="") accessDays = rec.accessDays;
-  // Submitted = when the request was uploaded (form submission). The access countdown is measured from here.
+  // Submitted = when the request was uploaded (form submission). Kept for reference/display.
   let submitted = existing ? (existing.submitted||"") : "";
-  const subD = parseWhen(rec.submitted); if(subD) submitted = subD.toISOString();
-  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content, accessDays, submitted]];
+  // SubmitMinLocal = the upload time-of-day as local minutes-since-midnight (matches what the
+  // dashboard displays). The digest uses this to send each alert at the request's upload time.
+  let submitMinLocal = existing ? (existing.submitMinLocal==null?"":existing.submitMinLocal) : "";
+  const subD = parseWhen(rec.submitted);
+  if(subD){ submitted = subD.toISOString(); submitMinLocal = subD.getHours()*60 + subD.getMinutes(); }
+  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content, accessDays, submitted, submitMinLocal]];
   if(existing && typeof existing.rowIndex==="number"){
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+existing.rowIndex+")",
       {method:"PATCH",body:JSON.stringify({values:vals})});
-    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content,accessDays,submitted});
+    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content,accessDays,submitted,submitMinLocal});
     tracking[id]=existing;
   } else {
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/add",
       {method:"POST",body:JSON.stringify({values:vals})});
-    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, accessDays, submitted, rowIndex:Object.keys(tracking).length };
+    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, accessDays, submitted, submitMinLocal, rowIndex:Object.keys(tracking).length };
   }
 }
 
@@ -508,10 +512,12 @@ function parseWhen(v){
   }
   const d=new Date(v); return isNaN(d)?null:d;
 }
-// Countdown is measured from when the request was uploaded (submitted) to the dashboard.
+// Countdown starts when the request is marked Done (access granted). Before that: "Awaiting grant".
 function accessInfo(r){
-  const d=parseWhen(r.submitted);
-  if(!d) return { cls:"exp-await", text:"—", expired:false, daysLeft:null };
+  const st=((r&&r.status)||"").toLowerCase();
+  if(st!=="done") return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
+  const d=parseWhen(r.doneAt) || parseWhen(r.updatedAt);   // updatedAt = fallback for legacy Done rows
+  if(!d) return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
   // Per-request window override (AccessDays); blank/invalid falls back to the global default.
   const ovr = (r && r.accessDays!=null && String(r.accessDays).trim()!=="") ? Number(r.accessDays) : NaN;
   const days = (!isNaN(ovr) && ovr>0) ? ovr : CONFIG.accessDays;
@@ -634,8 +640,8 @@ function render(){
       const ownerOpts=`<option value=""${r.owner?"":" selected"}>Unassigned</option>`+
         (CONFIG.owners||[]).map(o=>`<option${o===r.owner?" selected":""}>${esc(o)}</option>`).join("");
       const ai=accessInfo(r);
-      const aiTitle = ai.expired ? ' title="The access window (counted from the upload date) has elapsed — revoke this access."'
-        : (ai.cls==="exp-await" ? ' title="No upload date on record for this request."' : "");
+      const aiTitle = ai.expired ? ' title="The access window has elapsed — revoke this access."'
+        : (ai.cls==="exp-await" ? ' title="The countdown starts once this request is marked Done." ' : "");
       const accessCell=`<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=(r.status||"").toLowerCase()==="revoked";
