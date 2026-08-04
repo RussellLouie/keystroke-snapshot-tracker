@@ -414,11 +414,11 @@ async function ensureTracking(){
     if(sheets.indexOf(CONFIG.trackingSheet)<0){
       await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:CONFIG.trackingSheet})});
     }
-    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content | AccessDays
-    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:J1')",
-      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content","AccessDays"]]})});
+    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content | AccessDays | Submitted
+    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:K1')",
+      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content","AccessDays","Submitted"]]})});
     await graph(itemBase()+"/workbook/tables/add",
-      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:J1",hasHeaders:true})});
+      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:K1",hasHeaders:true})});
     const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
     const t = tbls.value[tbls.value.length-1];
     await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
@@ -429,7 +429,7 @@ async function ensureTracking(){
     const cols = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns?$select=name");
     let names = (cols.value||[]).map(c=>c.name);
     if(names.indexOf("Owner")<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:"Owner",index:3})}); names.push("Owner"); }
-    for(const col of ["DoneAt","Requester","Content","AccessDays"]){
+    for(const col of ["DoneAt","Requester","Content","AccessDays","Submitted"]){
       if(names.indexOf(col)<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:col})}); names.push(col); }
     }
   }catch(e){ /* column check best-effort */ }
@@ -441,7 +441,11 @@ async function readTracking(){
     const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange?$select=values");
     (r.values||[]).forEach((row,i)=>{
       const id=(row[0]||"").toString();
-      if(id) tracking[id]={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", accessDays:(row[9]==null?"":row[9]), rowIndex:i };
+      if(!id) return;
+      const rec={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", accessDays:(row[9]==null?"":row[9]), submitted:(row[10]==null?"":row[10]), rowIndex:i };
+      // Dedupe: if the sheet has more than one row for this id, keep the most recently updated.
+      const prev=tracking[id];
+      if(!prev || String(rec.updatedAt) >= String(prev.updatedAt)) tracking[id]=rec;
     });
   } catch(e){ /* table empty or missing rows -> ignore */ }
 }
@@ -451,23 +455,35 @@ async function saveTracking(rec){
   const requester=rec.requester||"", content=rec.content||"";
   const who = (account && (account.name||account.username)) || "";
   const when = new Date().toISOString();
-  const existing = tracking[id];
-  // DoneAt = when the request was marked Done (starts the 7-day access timer).
-  // Set on the transition into Done; kept while Done; cleared when it leaves Done.
+  let existing = tracking[id];
+  // Safeguard against duplicates: if we don't have this request cached, do a fresh lookup in the
+  // sheet so an existing row is always UPDATED rather than a second row being added.
+  if(!existing){
+    try{
+      const rr = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows?$select=index,values");
+      const match=(rr.value||[]).find(x=>((x.values&&x.values[0]&&x.values[0][0])+"")===(id+""));
+      if(match){ existing={ doneAt:(match.values[0][6]||""), accessDays:(match.values[0][9]==null?"":match.values[0][9]), submitted:(match.values[0][10]==null?"":match.values[0][10]), rowIndex:match.index }; }
+    }catch(e){ /* best effort */ }
+  }
+  // DoneAt (kept for the audit trail; countdown no longer depends on it).
   let doneAt = existing ? (existing.doneAt||"") : "";
   if((status||"").toLowerCase()==="done"){ if(!doneAt) doneAt = when; } else { doneAt = ""; }
   // AccessDays = per-request override for the countdown window (blank = use CONFIG.accessDays).
   let accessDays = existing ? (existing.accessDays==null?"":existing.accessDays) : "";
   if(rec.accessDays!=null && rec.accessDays!=="") accessDays = rec.accessDays;
-  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content, accessDays]];
+  // Submitted = when the request was uploaded (form submission). The access countdown is measured from here.
+  let submitted = existing ? (existing.submitted||"") : "";
+  const subD = parseWhen(rec.submitted); if(subD) submitted = subD.toISOString();
+  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content, accessDays, submitted]];
   if(existing && typeof existing.rowIndex==="number"){
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+existing.rowIndex+")",
       {method:"PATCH",body:JSON.stringify({values:vals})});
-    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content,accessDays});
+    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content,accessDays,submitted});
+    tracking[id]=existing;
   } else {
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/add",
       {method:"POST",body:JSON.stringify({values:vals})});
-    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, accessDays, rowIndex:Object.keys(tracking).length };
+    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, accessDays, submitted, rowIndex:Object.keys(tracking).length };
   }
 }
 
@@ -492,12 +508,10 @@ function parseWhen(v){
   }
   const d=new Date(v); return isNaN(d)?null:d;
 }
-// Countdown starts when the request is marked Done (access granted). Before that: "Awaiting grant".
+// Countdown is measured from when the request was uploaded (submitted) to the dashboard.
 function accessInfo(r){
-  const st=((r&&r.status)||"").toLowerCase();
-  if(st!=="done") return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
-  const d=parseWhen(r.doneAt) || parseWhen(r.updatedAt);   // updatedAt = fallback for legacy Done rows
-  if(!d) return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
+  const d=parseWhen(r.submitted);
+  if(!d) return { cls:"exp-await", text:"—", expired:false, daysLeft:null };
   // Per-request window override (AccessDays); blank/invalid falls back to the global default.
   const ovr = (r && r.accessDays!=null && String(r.accessDays).trim()!=="") ? Number(r.accessDays) : NaN;
   const days = (!isNaN(ovr) && ovr>0) ? ovr : CONFIG.accessDays;
@@ -620,8 +634,8 @@ function render(){
       const ownerOpts=`<option value=""${r.owner?"":" selected"}>Unassigned</option>`+
         (CONFIG.owners||[]).map(o=>`<option${o===r.owner?" selected":""}>${esc(o)}</option>`).join("");
       const ai=accessInfo(r);
-      const aiTitle = ai.expired ? ' title="The 7-day access window has elapsed — revoke this access."'
-        : (ai.cls==="exp-await" ? ' title="The 7-day countdown starts once this request is marked Done."' : "");
+      const aiTitle = ai.expired ? ' title="The access window (counted from the upload date) has elapsed — revoke this access."'
+        : (ai.cls==="exp-await" ? ' title="No upload date on record for this request."' : "");
       const accessCell=`<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=(r.status||"").toLowerCase()==="revoked";
