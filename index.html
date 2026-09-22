@@ -450,7 +450,17 @@ async function readTracking(){
   } catch(e){ /* table empty or missing rows -> ignore */ }
 }
 
+// Per-request save lock: an edit can fire twice near-simultaneously (change + blur). Serializing
+// saves for the same request prevents a race that would add a duplicate row instead of updating.
+let __saveLocks = {};
 async function saveTracking(rec){
+  const _id = rec && rec.id;
+  while(__saveLocks[_id]){ try{ await __saveLocks[_id]; }catch(e){} }
+  let _rel; __saveLocks[_id] = new Promise(r=>_rel=r);
+  try { return await saveTrackingInner(rec); }
+  finally { delete __saveLocks[_id]; _rel(); }
+}
+async function saveTrackingInner(rec){
   const id=rec.id, status=rec.status||"Pending", notes=rec.notes||"", owner=rec.owner||"";
   const requester=rec.requester||"", content=rec.content||"";
   const who = (account && (account.name||account.username)) || "";
