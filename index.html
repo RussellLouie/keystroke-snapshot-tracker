@@ -160,6 +160,34 @@
   .modal .feat input{ margin:0; } .modal .feat .hint{ margin:0; }
   .modal .m-warn{ background:#fef3c7; color:#92600e; border:1px solid #fde68a; border-radius:9px; padding:9px 12px; font-size:12.5px; }
   .modal .m-err{ color:#b42318; font-size:12.5px; display:none; }
+  /* ---------- PICKER ---------- */
+  .picker{ position:relative; border:1px solid var(--line); border-radius:8px; padding:6px 8px; background:#fff; }
+  .picker:focus-within{ border-color:var(--brand); box-shadow:0 0 0 3px rgba(21,96,246,.12); }
+  .picker input{ border:none !important; box-shadow:none !important; padding:6px 4px !important; width:100% !important; outline:none; }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .chips:empty{ display:none; }
+  .chip{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px 4px 10px; border-radius:999px; font-size:12.5px; font-weight:600; background:#eef1f6; color:#33405a; max-width:100%; }
+  .chip.c-dept{ background:#e8f0ff; color:#1e50b0; } .chip.c-agent{ background:#d9f7ee; color:#0f766e; }
+  .chip.c-miss{ background:#fee2e2; color:#b42318; }
+  .chip .sub{ font-weight:400; color:inherit; opacity:.75; font-size:11px; }
+  .chip .x{ border:none; background:transparent; color:inherit; cursor:pointer; font-size:14px; line-height:1; padding:0 2px; opacity:.7; }
+  .chip .x:hover{ opacity:1; }
+  .chip-miss-demo{ background:#fee2e2; color:#b42318; padding:1px 6px; border-radius:999px; font-weight:600; }
+  .sug{ position:absolute; left:0; right:0; top:100%; margin-top:4px; background:#fff; border:1px solid var(--line); border-radius:10px; box-shadow:0 10px 30px rgba(15,31,61,.18); max-height:240px; overflow:auto; z-index:60; display:none; }
+  .sug.open{ display:block; }
+  .sug .it{ padding:8px 12px; cursor:pointer; display:flex; align-items:center; gap:10px; font-size:13px; }
+  .sug .it:hover, .sug .it.active{ background:#f3f6fb; }
+  .sug .it .k{ font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 6px; border-radius:6px; }
+  .sug .it .k-dept{ background:#e8f0ff; color:#1e50b0; } .sug .it .k-agent{ background:#d9f7ee; color:#0f766e; }
+  .sug .it .m{ color:var(--muted2); font-size:11.5px; margin-left:auto; white-space:nowrap; }
+  .sug .none{ padding:10px 12px; color:var(--muted2); font-size:12.5px; }
+  .btn-xs{ padding:4px 9px !important; font-size:11.5px !important; }
+  .req-scope .ok{ color:#0f766e; } .req-scope .miss{ color:#b42318; font-weight:600; }
+  .req-scope .chk{ font-size:11px; margin-right:2px; }
+  .worker-pill{ display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted); }
+  .worker-pill .dot{ width:8px; height:8px; border-radius:50%; background:#9aa6b8; }
+  .worker-pill.ok .dot{ background:#16a34a; } .worker-pill.stale .dot{ background:#d97706; } .worker-pill.down .dot{ background:#dc2626; }
+  .banner.warn{ background:#fffbeb; color:#92600e; border:1px solid #fde68a; display:block; }
   .btn-del{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; }
   .btn-del:hover{ background:#fef2f2; } .btn-del:disabled{ opacity:.55; cursor:default; }
   select.owner-sel{ padding:6px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; color:#33405a; max-width:150px; }
@@ -272,7 +300,7 @@
               <tbody id="tbody"></tbody>
             </table>
           </div>
-          <div class="foot" id="foot"></div>
+          <div class="foot" style="display:flex;align-items:center;gap:12px"><span class="worker-pill" id="workerPill"><span class="dot"></span> Checking automation…</span><span style="flex:1"></span><span id="foot"></span></div>
         </div>
       </div>
     </div>
@@ -286,7 +314,7 @@
         <div class="m-warn">Approving queues the grant. The automation creates a scoped Access Control policy in Teramind within a few minutes, records the policy ID here, sets the request to <strong>Done</strong>, and emails the requester. Access is removed automatically when the window ends.</div>
         <div class="m-row">
           <div><label>Requester</label><input type="text" id="gmRequester" readonly></div>
-          <div><label>Requester email (Teramind login)</label><input type="text" id="gmEmail" placeholder="name@go.team"><div class="hint">Must match the employee's email in Teramind.</div></div>
+          <div><label>Requester email (Teramind login)</label><input type="text" id="gmEmail" placeholder="name@go.team" autocomplete="off"><div class="hint" id="gmEmailHint">Must match the employee's email in Teramind.</div></div>
         </div>
         <div class="m-row">
           <div><label>Access to grant</label>
@@ -297,9 +325,15 @@
             </div></div>
           <div><label>Access window (days)</label><input type="number" id="gmDays" min="1" max="365" step="1"></div>
         </div>
-        <div><label>Who they may view (one per line)</label>
-          <textarea id="gmSubjects" placeholder="Heffernan Network Insurance Brokers&#10;jane.doe@go.team"></textarea>
-          <div class="hint">Enter Teramind department names exactly as shown in Teramind, or team members' email addresses. The automation rejects anything it can't match.</div></div>
+        <div><label>Who they may view</label>
+          <div class="picker" id="gmPicker">
+            <div class="chips" id="gmChips"></div>
+            <input type="text" id="gmSearch" placeholder="Type a name, email or department to search Teramind…" autocomplete="off">
+            <div class="sug" id="gmSug"></div>
+          </div>
+          <div class="hint" id="gmPickHint">Pick from Teramind's people and departments. Entries marked <span class="chip-miss-demo">not in Teramind</span> must be fixed or removed before approving.</div>
+          <div class="hint" style="margin-top:6px"><button type="button" class="btn-ghost btn-xs" id="gmOwnDept">+ Requester's own department</button></div>
+          <textarea id="gmSubjects" style="display:none"></textarea></div>
         <div class="m-row">
           <div><label>Ticket</label><input type="text" id="gmTicket" placeholder="e.g. INC-1234"><div class="hint" id="gmTicketHint">Required for keystroke access.</div></div>
           <div><label>Approved by</label><input type="text" id="gmApprover" readonly></div>
@@ -369,6 +403,74 @@ const GRANT_SHEET="GrantQueue", GRANT_TABLE="GrantQueueTable";
 const GRANT_COLS=["Id","ResponseID","RequesterName","RequesterEmail","Feature","Subjects","AccessDays","Ticket","ApprovedBy","ApprovedAt","Status","PolicyId","Message","ProcessedAt"];
 // Extra Tracking columns (appended after SubmitMinLocal, in this order).
 const TRACK_EXTRA=["PolicyId","Hold","Subjects","ApprovedBy","ApprovedAt","Feature"];
+// Teramind directory published by the ARC worker (tm-directory.json in the same library) + worker heartbeat table.
+const DIRECTORY_FILE="tm-directory.json", WORKER_TABLE="WorkerStatusTable", WORKER_STALE_MIN=20;
+
+/* ============================================================
+   Teramind directory (people + departments) for suggestions and validation
+   ============================================================ */
+let DIR={ loaded:false, generated:null, agents:[], depts:[], byEmail:{}, byName:{}, deptByName:{} };
+function normName(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9@. ]+/g," ").replace(/\s+/g," ").trim(); }
+async function loadDirectory(){
+  try{
+    const raw = await graph("/drives/"+DRIVE_ID+"/root:/"+encodeURIComponent(DIRECTORY_FILE)+":/content");
+    const j = (typeof raw==="string") ? JSON.parse(raw) : raw;
+    DIR.agents=(j.agents||[]).filter(a=>!a.hidden || true); DIR.depts=j.departments||[]; DIR.generated=j.generated||null;
+    DIR.byEmail={}; DIR.byName={}; DIR.deptByName={};
+    DIR.agents.forEach(a=>{ if(a.email) DIR.byEmail[a.email.toLowerCase()]=a; const n=normName(a.name); if(n){ (DIR.byName[n]=DIR.byName[n]||[]).push(a); } });
+    DIR.depts.forEach(d=>{ DIR.deptByName[normName(d.name)]=d; });
+    DIR.loaded=true;
+  }catch(e){ DIR.loaded=false; /* worker hasn't published yet — picker falls back to free text */ }
+}
+// Resolve one typed entry (email, person name or department name) against the directory.
+function resolveEntry(text){
+  const t=String(text||"").trim(); if(!t) return null;
+  if(!DIR.loaded) return { kind:"unknown", label:t, value:t, unverified:true };
+  if(t.indexOf("@")>=0){ const a=DIR.byEmail[t.toLowerCase()]; return a ? { kind:"agent", label:a.name, sub:a.email, value:a.email, id:a.id, dept:a.dept } : { kind:"miss", label:t, value:t }; }
+  const n=normName(t);
+  const d=DIR.deptByName[n]; if(d) return { kind:"dept", label:d.name, sub:"department", value:d.name, id:d.id };
+  const ppl=DIR.byName[n]||[]; if(ppl.length===1){ const a=ppl[0]; return { kind:"agent", label:a.name, sub:a.email, value:a.email, id:a.id, dept:a.dept }; }
+  const partial=DIR.depts.filter(x=>normName(x.name).indexOf(n)>=0); if(partial.length===1){ const x=partial[0]; return { kind:"dept", label:x.name, sub:"department", value:x.name, id:x.id }; }
+  return { kind:"miss", label:t, value:t };
+}
+function resolveScopeText(text){ return String(text||"").split(/[\n;]+/).map(s=>s.trim()).filter(Boolean).map(resolveEntry).filter(Boolean); }
+function searchDirectory(q, limit){
+  q=normName(q); if(!q) return [];
+  const out=[]; const words=q.split(" ");
+  const hit=s=>{ s=normName(s); return words.every(w=>s.indexOf(w)>=0); };
+  for(const d of DIR.depts){ if(hit(d.name)) out.push({ kind:"dept", label:d.name, sub:"department", value:d.name, id:d.id }); if(out.length>=limit) return out; }
+  for(const a of DIR.agents){ if(a.hidden) continue; if(hit(a.name)||hit(a.email)) out.push({ kind:"agent", label:a.name, sub:a.email, value:a.email, id:a.id, dept:a.dept }); if(out.length>=limit) break; }
+  return out;
+}
+function requesterCheck(r){
+  // Returns {cls, text} describing whether the requester resolves in Teramind.
+  if(!DIR.loaded) return null;
+  const e=(r.email||"").trim().toLowerCase();
+  if(e && DIR.byEmail[e]) return { ok:true, text:"in Teramind", agent:DIR.byEmail[e] };
+  const ppl=DIR.byName[normName(r.requester)]||[];
+  if(ppl.length===1) return { ok:true, text:"in Teramind (matched by name)", agent:ppl[0] };
+  return { ok:false, text: e ? "email not in Teramind" : "not found in Teramind" };
+}
+
+/* ---- Worker heartbeat ---- */
+let WORKER={ lastRun:null, result:"", host:"" };
+async function loadWorkerStatus(){
+  try{
+    const r=await graph(itemBase()+"/workbook/tables/"+WORKER_TABLE+"/dataBodyRange?$select=values");
+    const row=(r.values||[])[0]||[]; WORKER={ lastRun:parseWhen(row[1]), result:row[2]||"", host:row[3]||"" };
+  }catch(e){ WORKER={ lastRun:null, result:"", host:"" }; }
+  renderWorkerStatus();
+}
+function renderWorkerStatus(){
+  const el=$("workerPill"); if(!el) return;
+  if(!WORKER.lastRun){ el.className="worker-pill down"; el.innerHTML='<span class="dot"></span> Automation not yet connected'; return; }
+  const mins=Math.round((Date.now()-WORKER.lastRun.getTime())/60000);
+  const ago = mins<1 ? "just now" : mins<60 ? mins+" min ago" : Math.round(mins/60)+" h ago";
+  const err=/^error/i.test(WORKER.result||"");
+  if(mins>WORKER_STALE_MIN){ el.className="worker-pill stale"; el.innerHTML='<span class="dot"></span> Automation last seen '+esc(ago)+' on '+esc(WORKER.host||"?")+' — grants and revokes are waiting';
+    showBanner("The Teramind automation (ARC worker on "+(WORKER.host||"the worker PC")+") last checked in "+ago+". Approved grants and expired access will be processed as soon as it is back online.","warn"); }
+  else { el.className="worker-pill "+(err?"stale":"ok"); el.innerHTML='<span class="dot"></span> Automation OK · last run '+esc(ago)+(err?' · '+esc(WORKER.result):''); }
+}
 
 /* ============================================================
    MSAL setup
@@ -774,6 +876,23 @@ function renderStats(){
      </div>`).join("");
 }
 
+// "Who to view" line under the description, with a per-entry Teramind check once the directory is loaded.
+function scopeLine(r){
+  if(!r.scope && !r.reqDays) return "";
+  let parts="";
+  if(r.scope){
+    const items=resolveScopeText(r.scope);
+    parts=items.map(it=>{
+      if(it.kind==="miss") return `<span class="miss" title="No matching person or department in Teramind — fix before approving"><span class="chk">✗</span>${esc(it.label)}</span>`;
+      if(it.kind==="unknown") return `<span>${esc(it.label)}</span>`;
+      return `<span class="ok" title="${esc(it.kind==="dept"?"Department in Teramind":"Team member in Teramind: "+(it.sub||""))}"><span class="chk">✓</span>${esc(it.label)}</span>`;
+    }).join(' <span class="muted">·</span> ');
+  }
+  const rq=requesterCheck(r);
+  const rqHtml = rq ? (rq.ok ? "" : ` <span class="miss" title="The requester's sign-in email does not match any Teramind employee">· requester ${esc(rq.text)}</span>`) : "";
+  return `<div class="req-scope">${parts?`<span title="Who the requester asked to view">👁 ${parts}</span>`:""}${r.reqDays?`<span class="muted"> · asked for ${esc(r.reqDays)}</span>`:""}${rqHtml}</div>`;
+}
+
 function render(){
   renderStats();
   const list=filtered(), tb=$("tbody");
@@ -806,7 +925,7 @@ function render(){
         <td>${esc(fmt(r.submitted))}</td>
         <td>${esc(r.requester)}</td>
         <td style="white-space:nowrap">${typePills(r.type)}</td>
-        <td class="content">${r.content?`<div class="clamp" title="${esc(r.content)}">${esc(r.content)}</div>`:'<span class="muted">—</span>'}${(r.scope||r.reqDays)?`<div class="req-scope">${r.scope?`<span title="Who the requester asked to view">👁 ${esc(String(r.scope).replace(/\s*\n+\s*/g," · "))}</span>`:""}${r.reqDays?`<span class="muted"> · asked for ${esc(r.reqDays)}</span>`:""}</div>`:""}</td>
+        <td class="content">${r.content?`<div class="clamp" title="${esc(r.content)}">${esc(r.content)}</div>`:'<span class="muted">—</span>'}${scopeLine(r)}</td>
         <td>${r.priority?`<span class="pill ${prioClass(r.priority)}">${esc(r.priority)}</span>`:""}</td>
         <td>${ticket}</td>
         <td class="content">${r.reqNotes?`<div class="clamp" title="${esc(r.reqNotes)}">${esc(r.reqNotes)}</div>`:'<span class="muted">—</span>'}</td>
@@ -852,6 +971,8 @@ function wire(){
   $("gmCancel").onclick=closeGrantModal;
   $("gmConfirm").onclick=confirmGrant;
   $("gmFeature").addEventListener("change", updateTicketHint);
+  wirePicker();
+  $("gmEmail").addEventListener("input", checkEmailField);
   $("grantModal").addEventListener("click",(e)=>{ if(e.target===$("grantModal")) closeGrantModal(); });
   document.addEventListener("keydown",(e)=>{ if(e.key==="Escape" && $("grantModal").classList.contains("open")) closeGrantModal(); });
   $("reloadBtn").onclick=loadData;
@@ -908,23 +1029,95 @@ function openGrantModal(rec){
   if(isNaN(ovr)||ovr<=0){ const m=String(rec.reqDays||"").match(/\d+/); if(m) ovr=Math.min(365,Math.max(1,parseInt(m[0],10))); }
   $("gmDays").value=(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays;
   // Scope: what was approved before, else what the requester wrote on the form (one entry per line).
-  $("gmSubjects").value=rec.subjects ? rec.subjects.split(/;\s*/).join("\n") : String(rec.scope||"").split(/[\n;,]+/).map(s=>s.trim()).filter(Boolean).join("\n");
+  const seed = rec.subjects ? rec.subjects.split(/;\s*/) : String(rec.scope||"").split(/[\n;,]+/);
+  CHIPS = seed.map(s=>s.trim()).filter(Boolean).map(resolveEntry).filter(Boolean);
+  renderChips(); $("gmSearch").value=""; closeSug(); checkEmailField();
+  $("gmPickHint").innerHTML = DIR.loaded
+    ? 'Pick from Teramind\'s people and departments. Entries marked <span class="chip-miss-demo">not in Teramind</span> must be fixed or removed before approving.'
+    : 'Teramind directory not available yet (the automation publishes it). Entries are sent as typed and checked by the automation.';
   $("gmTicket").value=rec.ticketId||"";
   $("gmApprover").value=(account&&(account.name||account.username))||"";
   updateTicketHint();
   $("gmErr").style.display="none"; $("gmErr").textContent="";
   $("gmConfirm").disabled=false; $("gmConfirm").textContent="Approve & queue grant";
   $("grantModal").classList.add("open");
-  setTimeout(()=>$("gmSubjects").focus(),50);
+  setTimeout(()=>$("gmSearch").focus(),50);
 }
-function closeGrantModal(){ $("grantModal").classList.remove("open"); grantTarget=null; }
+function closeGrantModal(){ $("grantModal").classList.remove("open"); grantTarget=null; closeSug(); }
+
+/* ---- Subject picker (chips + suggestions from the Teramind directory) ---- */
+let CHIPS=[], SUG=[], sugIdx=-1;
+function chipsValue(){ return CHIPS.map(c=>c.value); }
+function renderChips(){
+  $("gmChips").innerHTML = CHIPS.map((c,i)=>{
+    const cls = c.kind==="dept"?"c-dept" : c.kind==="agent"?"c-agent" : c.kind==="miss"?"c-miss":"";
+    const sub = c.kind==="miss" ? "not in Teramind" : (c.sub||"");
+    return `<span class="chip ${cls}" title="${esc(c.kind==="miss"?"No matching person or department in Teramind. Remove it, or search for the right one.":(c.sub||""))}">${esc(c.label)}${sub?` <span class="sub">${esc(sub)}</span>`:""}<button type="button" class="x" data-i="${i}" aria-label="Remove">×</button></span>`;
+  }).join("");
+}
+function addChip(c){ if(!c) return; if(CHIPS.some(x=>x.kind===c.kind && String(x.value).toLowerCase()===String(c.value).toLowerCase())) return; CHIPS.push(c); renderChips(); }
+function closeSug(){ $("gmSug").classList.remove("open"); SUG=[]; sugIdx=-1; }
+function openSug(q){
+  if(!DIR.loaded){ closeSug(); return; }
+  SUG=searchDirectory(q, 12); sugIdx=SUG.length?0:-1;
+  const el=$("gmSug");
+  el.innerHTML = SUG.length ? SUG.map((s,i)=>`<div class="it${i===sugIdx?" active":""}" data-i="${i}"><span class="k ${s.kind==="dept"?"k-dept":"k-agent"}">${s.kind==="dept"?"Dept":"Person"}</span><span>${esc(s.label)}</span><span class="m">${esc(s.kind==="dept"?"":(s.sub||"")+(s.dept?" · "+s.dept:""))}</span></div>`).join("")
+                            : `<div class="none">No person or department in Teramind matches “${esc(q)}”.</div>`;
+  el.classList.add("open");
+}
+function commitSearch(){
+  const q=$("gmSearch").value.trim(); if(!q) return;
+  if(SUG.length && sugIdx>=0){ addChip(SUG[sugIdx]); }
+  else { addChip(resolveEntry(q)); }
+  $("gmSearch").value=""; closeSug();
+}
+function wirePicker(){
+  const inp=$("gmSearch");
+  inp.addEventListener("input", ()=>{ const q=inp.value.trim(); if(q.length>=2) openSug(q); else closeSug(); });
+  inp.addEventListener("keydown", (e)=>{
+    if(e.key==="ArrowDown"&&SUG.length){ e.preventDefault(); sugIdx=(sugIdx+1)%SUG.length; openSugRefresh(); }
+    else if(e.key==="ArrowUp"&&SUG.length){ e.preventDefault(); sugIdx=(sugIdx-1+SUG.length)%SUG.length; openSugRefresh(); }
+    else if(e.key==="Enter"||e.key==="Tab"&&inp.value.trim()){ if(inp.value.trim()){ e.preventDefault(); commitSearch(); } }
+    else if(e.key==="Escape"){ closeSug(); }
+    else if(e.key==="Backspace"&&!inp.value&&CHIPS.length){ CHIPS.pop(); renderChips(); }
+  });
+  inp.addEventListener("paste", (e)=>{ const t=(e.clipboardData||window.clipboardData).getData("text"); if(t && /[\n;,]/.test(t)){ e.preventDefault(); t.split(/[\n;,]+/).map(s=>s.trim()).filter(Boolean).forEach(s=>addChip(resolveEntry(s))); } });
+  $("gmSug").addEventListener("mousedown", (e)=>{ const it=e.target.closest(".it"); if(!it) return; e.preventDefault(); addChip(SUG[+it.getAttribute("data-i")]); inp.value=""; closeSug(); inp.focus(); });
+  $("gmChips").addEventListener("click", (e)=>{ const x=e.target.closest(".x"); if(!x) return; CHIPS.splice(+x.getAttribute("data-i"),1); renderChips(); });
+  $("gmPicker").addEventListener("click", (e)=>{ if(e.target===$("gmPicker")||e.target===$("gmChips")) inp.focus(); });
+  document.addEventListener("click", (e)=>{ if(!e.target.closest("#gmPicker")) closeSug(); });
+  $("gmOwnDept").onclick=()=>{
+    const rec=grantTarget; if(!rec) return;
+    const em=$("gmEmail").value.trim().toLowerCase();
+    const a=(em&&DIR.byEmail[em]) || ((DIR.byName[normName(rec.requester)]||[])[0]);
+    if(!DIR.loaded) return gmError("Teramind directory not available yet.");
+    if(!a || !a.dept) return gmError("Couldn't find the requester's department in Teramind — search for it instead.");
+    const d=DIR.deptByName[normName(a.dept)]; addChip(d ? { kind:"dept", label:d.name, sub:"department", value:d.name, id:d.id } : resolveEntry(a.dept));
+  };
+}
+function checkEmailField(){
+  const el=$("gmEmailHint"), em=$("gmEmail").value.trim().toLowerCase();
+  if(!DIR.loaded || !em){ el.innerHTML="Must match the employee's email in Teramind."; return; }
+  const a=DIR.byEmail[em];
+  if(a){ el.innerHTML='<span style="color:#0f766e;font-weight:600">✓ In Teramind:</span> '+esc(a.name)+(a.dept?' · '+esc(a.dept):''); }
+  else {
+    const ppl=DIR.byName[normName(grantTarget&&grantTarget.requester)]||[];
+    el.innerHTML='<span style="color:#b42318;font-weight:600">✗ Not in Teramind.</span> '+(ppl.length?'Did you mean <a href="#" id="gmEmailFix">'+esc(ppl[0].email)+'</a>?':'Check the spelling or search the name in the box below.');
+    const fix=$("gmEmailFix"); if(fix) fix.onclick=(e)=>{ e.preventDefault(); $("gmEmail").value=ppl[0].email; checkEmailField(); };
+  }
+}
+function openSugRefresh(){ const el=$("gmSug"); [...el.querySelectorAll(".it")].forEach((n,i)=>n.classList.toggle("active", i===sugIdx)); }
 function gmError(msg){ const el=$("gmErr"); el.textContent=msg; el.style.display="block"; }
 async function confirmGrant(){
   const rec=grantTarget; if(!rec) return;
   const email=$("gmEmail").value.trim().toLowerCase();
   const features=selectedFeatures(); const feature=features.join("; ");
   const days=parseInt($("gmDays").value,10);
-  const subjects=$("gmSubjects").value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  if($("gmSearch").value.trim()) commitSearch();                 // don't lose a half-typed entry
+  const missing=CHIPS.filter(c=>c.kind==="miss").map(c=>c.label);
+  if(missing.length) return gmError("Not in Teramind: "+missing.join(", ")+". Remove these or pick the right person/department.");
+  if(DIR.loaded && !DIR.byEmail[email]) return gmError("The requester email "+email+" does not match anyone in Teramind. Correct it before approving.");
+  const subjects=chipsValue();
   const ticket=$("gmTicket").value.trim();
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return gmError("Enter the requester's email address as it appears in Teramind.");
   if(isNaN(days)||days<1||days>365) return gmError("Access window must be between 1 and 365 days.");
@@ -1078,6 +1271,7 @@ async function loadData(){
   try{
     await withRetry(()=>ensureTracking());
     await withRetry(()=>readTracking());
+    await Promise.all([loadDirectory(), loadWorkerStatus()]);
     buildRows(lastValues);
     render();
   }catch(e){
