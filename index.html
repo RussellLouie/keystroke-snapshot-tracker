@@ -945,8 +945,10 @@ function render(){
   if(!list.length){ tb.innerHTML=`<tr><td colspan="14" class="empty">No requests match.</td></tr>`; }
   else {
     tb.innerHTML=list.map(r=>{
-      const ticket = (r.ticketRaised||"").toString().toLowerCase().indexOf("yes")>=0
-        ? `<span class="yes">${esc(r.ticketId||"Yes")}</span>` : `<span class="no">—</span>`;
+      // A ticket ID is now mandatory on the form; the old Yes/No question is kept only for legacy rows.
+      const hasTicket = !!(r.ticketId&&String(r.ticketId).trim()) || (r.ticketRaised||"").toString().toLowerCase().indexOf("yes")>=0;
+      const ticket = hasTicket
+        ? `<span class="yes">${esc(r.ticketId||"Yes")}</span>` : `<span class="no" title="No ticket recorded">—</span>`;
       const opts=["Pending","In progress","Approved","Done","Revoked"].map(o=>`<option${o===r.status?" selected":""}>${o}</option>`).join("");
       const ownerOpts=`<option value=""${r.owner?"":" selected"}>Unassigned</option>`+
         (CONFIG.owners||[]).map(o=>`<option${o===r.owner?" selected":""}>${esc(o)}</option>`).join("");
@@ -1020,7 +1022,7 @@ function wire(){
   $("tbody").addEventListener("blur", onEdit, true);
   $("tbody").addEventListener("click", onRevoke);
   $("tbody").addEventListener("click", onApproveClick);
-  $("tbody").addEventListener("click", onLinkPolicy);
+  $("tbody").addEventListener("click", onLinkPolicy);   // hand-made policy → auto-revoke
   $("tbody").addEventListener("click", (e)=>{
     const el=e.target.closest('[data-act="copy-policy"]'); if(!el) return;
     const txt=el.textContent; (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{
