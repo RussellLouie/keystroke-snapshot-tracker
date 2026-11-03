@@ -135,7 +135,8 @@
   input.days-in:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(21,96,246,.12); }
   input.days-in::placeholder{ color:#9aa6b8; }
   .policy-id{ font-size:11px; color:#8a93a6; }
-  .policy-name{ display:block; font-size:11px; font-family:ui-monospace,Consolas,monospace; color:#4b5563; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:6px; padding:3px 6px; margin-top:4px; max-width:220px; white-space:normal; word-break:break-word; cursor:copy; }
+  .policy-cell{ min-width:230px; max-width:300px; }
+  .policy-name{ display:inline-block; font-size:12px; font-family:ui-monospace,Consolas,monospace; color:#374151; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:6px; padding:4px 8px; margin-top:4px; white-space:normal; word-break:break-word; line-height:1.4; cursor:copy; }
   .policy-name:hover{ background:#e8ecf3; }
   .policy-name.copied{ background:#dcfce7; border-color:#86efac; color:#15803d; }
   .req-scope{ margin-top:6px; font-size:11.5px; color:#516079; line-height:1.4; }
@@ -294,6 +295,7 @@
                 <th data-sort="ticket">Ticket</th>
                 <th data-sort="reqNotes">Requester notes</th>
                 <th data-sort="access" title="How many days the requester keeps access once the request is Done. Blank = default.">Access window</th>
+                <th title="Access Control policy the automation created in Teramind (Manage → Access Control). Click the name to copy it.">Teramind policy</th>
                 <th data-sort="owner">Owner</th>
                 <th data-sort="status">Status</th>
                 <th data-sort="updatedAt">Last updated</th>
@@ -934,7 +936,7 @@ function scopeLine(r){
 function render(){
   renderStats();
   const list=filtered(), tb=$("tbody");
-  if(!list.length){ tb.innerHTML=`<tr><td colspan="13" class="empty">No requests match.</td></tr>`; }
+  if(!list.length){ tb.innerHTML=`<tr><td colspan="14" class="empty">No requests match.</td></tr>`; }
   else {
     tb.innerHTML=list.map(r=>{
       const ticket = (r.ticketRaised||"").toString().toLowerCase().indexOf("yes")>=0
@@ -949,7 +951,10 @@ function render(){
       const daysVal=(r.accessDays==null||String(r.accessDays).trim()==="")?"":String(r.accessDays);
       const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
       const stLow=(r.status||"").toLowerCase();
-      const policyTag = r.policyId ? `<span class="policy-id" title="Teramind Access Control policy created by the automation (Manage → Access Control)">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</span><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>` : "";
+      const policyTag = "";
+      const policyCell = r.policyId
+        ? `<div class="policy-id">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>`
+        : (stLow==="approved" ? '<span class="muted">Granting…</span>' : '<span class="muted">—</span>');
       const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}> Hold</label>` : "";
       const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
@@ -968,6 +973,7 @@ function render(){
         <td>${ticket}</td>
         <td class="content">${r.reqNotes?`<div class="clamp" title="${esc(r.reqNotes)}">${esc(r.reqNotes)}</div>`:'<span class="muted">—</span>'}</td>
         <td>${accessCell}</td>
+        <td class="policy-cell">${policyCell}</td>
         <td><select class="owner-sel" data-act="owner">${ownerOpts}</select></td>
         <td><select class="status-sel ${statusClass(r.status)}" data-act="status">${opts}</select></td>
         <td class="lastup">${lastUp}</td>
