@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · link-policy build -->
+<!-- GoTeam Access Request Center · fast-load build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -443,16 +443,27 @@ const DIRECTORY_FILE="tm-directory.json", WORKER_TABLE="WorkerStatusTable", WORK
    ============================================================ */
 let DIR={ loaded:false, generated:null, agents:[], depts:[], byEmail:{}, byName:{}, deptByName:{} };
 function normName(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9@. ]+/g," ").replace(/\s+/g," ").trim(); }
+function applyDirectory(j){
+  DIR.agents=j.agents||[]; DIR.depts=j.departments||[]; DIR.generated=j.generated||null;
+  DIR.byEmail={}; DIR.byName={}; DIR.deptByName={};
+  DIR.agents.forEach(a=>{ if(a.email) DIR.byEmail[a.email.toLowerCase()]=a; const n=normName(a.name); if(n){ (DIR.byName[n]=DIR.byName[n]||[]).push(a); } });
+  DIR.depts.forEach(d=>{ DIR.deptByName[normName(d.name)]=d; });
+  DIR.loaded=true;
+}
+const DIR_CACHE_KEY="arc.tmDirectory.v1";
+// The directory is the slowest download (a large JSON via SharePoint), so a cached copy from the last visit
+// is applied instantly and the fresh one replaces it when it arrives (the worker republishes every 5 min).
+function loadDirectoryFromCache(){
+  try{ const c=localStorage.getItem(DIR_CACHE_KEY); if(c){ applyDirectory(JSON.parse(c)); return true; } }catch(e){}
+  return false;
+}
 async function loadDirectory(){
   try{
     const raw = await graph("/drives/"+DRIVE_ID+"/root:/"+encodeURIComponent(DIRECTORY_FILE)+":/content");
     const j = (typeof raw==="string") ? JSON.parse(raw) : raw;
-    DIR.agents=(j.agents||[]).filter(a=>!a.hidden || true); DIR.depts=j.departments||[]; DIR.generated=j.generated||null;
-    DIR.byEmail={}; DIR.byName={}; DIR.deptByName={};
-    DIR.agents.forEach(a=>{ if(a.email) DIR.byEmail[a.email.toLowerCase()]=a; const n=normName(a.name); if(n){ (DIR.byName[n]=DIR.byName[n]||[]).push(a); } });
-    DIR.depts.forEach(d=>{ DIR.deptByName[normName(d.name)]=d; });
-    DIR.loaded=true;
-  }catch(e){ DIR.loaded=false; /* worker hasn't published yet — picker falls back to free text */ }
+    applyDirectory(j);
+    try{ localStorage.setItem(DIR_CACHE_KEY, JSON.stringify({generated:j.generated||null, agents:DIR.agents, departments:DIR.depts})); }catch(e){}
+  }catch(e){ /* keep whatever is loaded (cache or nothing) — picker falls back to free text */ }
 }
 // Resolve one typed entry (email, person name or department name) against the directory.
 function resolveEntry(text){
@@ -1356,6 +1367,7 @@ async function loadData(){
   hideBanner(); $("loading").style.display="block"; $("tbl").style.display="none";
   if(!DRIVE_ID){ try{ await resolveWorkbook(); }catch(err){ $("loading").style.display="none"; showBanner("Couldn't load data: "+err.message+" — click Reload to try again.","err"); return; } }
   // Everything is read-only here, so fire all four reads at once instead of one after another.
+  loadDirectoryFromCache();                       // instant ✓/✗ + picker from the last visit
   const pResp   = withRetry(()=>readResponses());
   const pTrack  = withRetry(()=>readTrackingStrict()).then(()=>true, ()=>false);
   const pDir    = loadDirectory().catch(()=>{});
