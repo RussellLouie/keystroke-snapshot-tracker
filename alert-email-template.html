@@ -1,0 +1,83 @@
+<!--
+  GoTeam · Access review alert — HTML body for the Power Automate "Send an email (V2)" action.
+  1. In the Send an email action, click "</>" (Code View) in the body editor and paste everything below the line.
+  2. Replace each {{Placeholder}} with the matching dynamic content from the Tracking / Requests row:
+     {{Owner}} {{Requester}} {{Type}} {{Content}} {{Submitted}} {{DoneAt}} {{AccessDays}} {{Ticket}} {{Notes}}
+     Dates: use formatDateTime(<value>, 'ddd d MMM yyyy, h:mm tt') so they don't show as 2026-10-23T18:49:16.492Z.
+  3. Suggested subject:  Access review · {{Requester}} · {{Type}} access has expired — please revoke
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f9;padding:24px 0;font-family:Segoe UI,Arial,sans-serif;">
+  <tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:10px;border:1px solid #e3e8f0;overflow:hidden;">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:#0f1f3d;padding:18px 28px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td style="color:#ffffff;font-size:17px;font-weight:600;">GoTeam IT · Access Request Center</td>
+            <td align="right" style="color:#9fb3d9;font-size:12px;">Automated notice</td>
+          </tr></table>
+        </td>
+      </tr>
+
+      <!-- Alert strip -->
+      <tr>
+        <td style="background:#fee2e2;border-bottom:1px solid #fecaca;padding:12px 28px;color:#b42318;font-size:14px;font-weight:600;">
+          Action required: the access window for this request has ended.
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="padding:24px 28px 8px 28px;color:#1f2a44;font-size:15px;line-height:1.55;">
+          Hi {{Owner}},<br><br>
+          The temporary Teramind access below was granted under a request you own and has now passed its approved window.
+          Please <strong>revoke the access in Teramind</strong> and mark the request as <strong>Revoked</strong> in the Access Request Center.
+        </td>
+      </tr>
+
+      <!-- Details card -->
+      <tr>
+        <td style="padding:12px 28px 20px 28px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e3e8f0;border-radius:8px;font-size:14px;color:#1f2a44;">
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;width:160px;border-bottom:1px solid #eef1f6;">Requester</td><td style="padding:10px 14px;border-bottom:1px solid #eef1f6;"><strong>{{Requester}}</strong></td></tr>
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;border-bottom:1px solid #eef1f6;">Access type</td><td style="padding:10px 14px;border-bottom:1px solid #eef1f6;">{{Type}}</td></tr>
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;border-bottom:1px solid #eef1f6;vertical-align:top;">Reason given</td><td style="padding:10px 14px;border-bottom:1px solid #eef1f6;">{{Content}}</td></tr>
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;border-bottom:1px solid #eef1f6;">Submitted</td><td style="padding:10px 14px;border-bottom:1px solid #eef1f6;">{{Submitted}}</td></tr>
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;border-bottom:1px solid #eef1f6;">Access granted</td><td style="padding:10px 14px;border-bottom:1px solid #eef1f6;">{{DoneAt}}</td></tr>
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;border-bottom:1px solid #eef1f6;">Approved window</td><td style="padding:10px 14px;border-bottom:1px solid #eef1f6;">{{AccessDays}} days</td></tr>
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;border-bottom:1px solid #eef1f6;">Ticket</td><td style="padding:10px 14px;border-bottom:1px solid #eef1f6;">{{Ticket}}</td></tr>
+            <tr><td style="padding:10px 14px;background:#f8fafc;color:#516079;">Owner</td><td style="padding:10px 14px;">{{Owner}}</td></tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- CTA -->
+      <tr>
+        <td align="center" style="padding:4px 28px 24px 28px;">
+          <a href="https://russelllouie.github.io/keystroke-snapshot-tracker/"
+             style="display:inline-block;background:#1560f6;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:11px 22px;border-radius:8px;">
+            Open the Access Request Center
+          </a>
+        </td>
+      </tr>
+
+      <!-- Checklist -->
+      <tr>
+        <td style="padding:0 28px 24px 28px;color:#516079;font-size:13px;line-height:1.6;border-top:1px solid #eef1f6;padding-top:16px;">
+          <strong style="color:#1f2a44;">What to do</strong><br>
+          1. In Teramind, remove the keystroke / snapshot / video playback access for {{Requester}}.<br>
+          2. In the Access Request Center, set the request's status to <strong>Revoked</strong> so the alerts stop and the audit record is kept.<br>
+          3. If the requester still needs access, extend the window in the <em>Access window</em> column instead of revoking.
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#f8fafc;padding:14px 28px;color:#8a97ad;font-size:12px;line-height:1.5;border-top:1px solid #e3e8f0;">
+          Sent automatically by teramind.alerts@go.team on behalf of the GoTeam IT Department. This mailbox is not monitored — reply to the IT Department instead.
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>

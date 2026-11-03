@@ -129,6 +129,11 @@
   .exp{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
   .exp-ok{ background:#eef1f6; color:#516079; } .exp-warn{ background:#fef3c7; color:#92600e; } .exp-over{ background:#fee2e2; color:#b42318; }
   .exp-await{ background:#e8f0ff; color:#2f5bb0; }
+  .access-wrap{ display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+  .days-lbl{ display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#516079; white-space:nowrap; }
+  input.days-in{ width:56px; padding:5px 7px; border:1px solid var(--line); border-radius:8px; font:inherit; font-size:13px; text-align:right; }
+  input.days-in:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(21,96,246,.12); }
+  input.days-in::placeholder{ color:#9aa6b8; }
   .btn-del{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; }
   .btn-del:hover{ background:#fef2f2; } .btn-del:disabled{ opacity:.55; cursor:default; }
   select.owner-sel{ padding:6px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; color:#33405a; max-width:150px; }
@@ -231,7 +236,7 @@
                 <th data-sort="priority">Priority</th>
                 <th data-sort="ticket">Ticket</th>
                 <th data-sort="reqNotes">Requester notes</th>
-                <th data-sort="access">Access (7d)</th>
+                <th data-sort="access" title="How many days the requester keeps access once the request is Done. Blank = default.">Access window</th>
                 <th data-sort="owner">Owner</th>
                 <th data-sort="status">Status</th>
                 <th data-sort="updatedAt">Last updated</th>
@@ -480,7 +485,7 @@ async function saveTrackingInner(rec){
   if((status||"").toLowerCase()==="done"){ if(!doneAt) doneAt = when; } else { doneAt = ""; }
   // AccessDays = per-request override for the countdown window (blank = use CONFIG.accessDays).
   let accessDays = existing ? (existing.accessDays==null?"":existing.accessDays) : "";
-  if(rec.accessDays!=null && rec.accessDays!=="") accessDays = rec.accessDays;
+  if(rec.accessDays!==undefined && rec.accessDays!==null) accessDays = rec.accessDays;   // "" clears the override
   // Submitted = when the request was uploaded (form submission). Kept for reference/display.
   let submitted = existing ? (existing.submitted||"") : "";
   // SubmitMinLocal = the upload time-of-day as local minutes-since-midnight (matches what the
@@ -652,7 +657,10 @@ function render(){
       const ai=accessInfo(r);
       const aiTitle = ai.expired ? ' title="The access window has elapsed — revoke this access."'
         : (ai.cls==="exp-await" ? ' title="The countdown starts once this request is marked Done." ' : "");
-      const accessCell=`<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>`;
+      const isRev=(r.status||"").toLowerCase()==="revoked";
+      const daysVal=(r.accessDays==null||String(r.accessDays).trim()==="")?"":String(r.accessDays);
+      const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
+      const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span></div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=(r.status||"").toLowerCase()==="revoked";
       const actionCell = isRevoked
@@ -717,6 +725,16 @@ async function onEdit(e){
   if(sel){ rec.status=sel.value; sel.className="status-sel "+statusClass(rec.status); }
   if(inp) rec.notes=inp.value;
   if(own) rec.owner=own.value;
+  const dayIn=tr.querySelector('[data-act="days"]');
+  if(dayIn){
+    const raw=dayIn.value.trim();
+    if(raw===""){ rec.accessDays=""; }                        // blank = fall back to CONFIG.accessDays
+    else {
+      const n=parseInt(raw,10);
+      if(isNaN(n)||n<1||n>365){ showBanner("Access window must be a whole number of days between 1 and 365.","err"); dayIn.value=(rec.accessDays==null?"":rec.accessDays); return; }
+      rec.accessDays=n; dayIn.value=String(n);
+    }
+  }
   const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
   try{
     await withRetry(()=>saveTracking(rec));
@@ -813,9 +831,13 @@ async function emailSheetLink(){
 }
 
 function exportCsv(){
-  const cols=[["submitted","Submitted"],["requester","Requester"],["type","Type"],["content","Content"],["priority","Priority"],["ticketRaised","Ticket raised"],["ticketId","Ticket ID"],["reqNotes","Requester notes"],["status","Status"],["notes","Internal notes"]];
-  const lines=[cols.map(c=>c[1]).join(",")].concat(filtered().map(r=>
-    cols.map(c=>'"'+String(r[c[0]]==null?"":r[c[0]]).replace(/"/g,'""')+'"').join(",")));
+  const cols=[["submitted","Submitted"],["requester","Requester"],["type","Type"],["content","Content"],["priority","Priority"],["ticketRaised","Ticket raised"],["ticketId","Ticket ID"],["reqNotes","Requester notes"],["accessWindow","Access window (days)"],["accessState","Access"],["owner","Owner"],["status","Status"],["notes","Internal notes"]];
+  const lines=[cols.map(c=>c[1]).join(",")].concat(filtered().map(r=>{
+    const ai=accessInfo(r);
+    const ovr=(r.accessDays==null||String(r.accessDays).trim()==="")?NaN:Number(r.accessDays);
+    const x=Object.assign({},r,{accessWindow:(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays, accessState:ai.text});
+    return cols.map(c=>'"'+String(x[c[0]]==null?"":x[c[0]]).replace(/"/g,'""')+'"').join(",");
+  }));
   const blob=new Blob([lines.join("\n")],{type:"text/csv"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="requests.csv"; a.click();
 }
