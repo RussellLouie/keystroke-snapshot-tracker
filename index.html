@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · fast-load build -->
+<!-- GoTeam Access Request Center · fast-load build 3 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1372,28 +1372,26 @@ async function loadData(){
   const pTrack  = withRetry(()=>readTrackingStrict()).then(()=>true, ()=>false);
   const pDir    = loadDirectory().catch(()=>{});
   const pWorker = loadWorkerStatus().catch(()=>{});
-  // 1) Show the responses as soon as they arrive (tracking overlay follows a moment later)
+  // 1) Responses are required; without them there is nothing to show.
   try{
     lastValues = await pResp;
-    tracking = {};
-    buildRows(lastValues);
-    render();
-    $("loading").style.display="none"; $("tbl").style.display="table";
   }catch(err){
     $("loading").style.display="none";
     showBanner("Couldn't load data: "+err.message+" — click Reload to try again.","err");
     return;
   }
-  // 2) Overlay shared status/notes (best effort — may be locked briefly)
+  // 2) Wait for the status/notes overlay too, so the table is painted ONCE with real statuses
+  //    (painting responses first showed everything as Pending/Unassigned for a few seconds).
+  let trackOk = false;
   try{
-    let ok = await pTrack;
-    if(!ok){ await ensureTrackingOnce(); await withRetry(()=>readTracking()); }
-    buildRows(lastValues);
-    render();                                   // statuses/notes visible now
-    pDir.then(()=>{ buildRows(lastValues); render(); });   // ✓/✗ indicators + picker once the directory lands
-  }catch(e){
-    showBanner("Requests are shown. Status/notes editing is briefly unavailable because the workbook is open for editing elsewhere — click Reload in a moment.","info");
-  }
+    trackOk = await pTrack;
+    if(!trackOk){ await ensureTrackingOnce(); await withRetry(()=>readTracking()); trackOk = true; }
+  }catch(e){ tracking = {}; }
+  buildRows(lastValues);
+  render();
+  $("loading").style.display="none"; $("tbl").style.display="table";
+  if(!trackOk) showBanner("Requests are shown without their statuses because the workbook is open for editing elsewhere — click Reload in a moment.","info");
+  pDir.then(()=>{ buildRows(lastValues); render(); });   // ✓/✗ indicators + picker once the directory lands
 }
 // readTracking() swallows errors; this variant throws so loadData can tell "missing table" from "empty".
 async function readTrackingStrict(){
