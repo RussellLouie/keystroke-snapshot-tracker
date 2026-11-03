@@ -598,6 +598,7 @@ async function renameTable(tableId, name){
 }
 
 async function readResponses(){
+  if(!RESP_SHEET && CONFIG.responseSheet) RESP_SHEET = CONFIG.responseSheet;   // pinned: skip the sheet lookup
   if(!RESP_SHEET){
     const sheets = await listSheets();
     const internal=[CONFIG.trackingSheet, OUTBOX_SHEET, GRANT_SHEET];
@@ -1375,9 +1376,9 @@ async function loadData(){
   try{
     let ok = await pTrack;
     if(!ok){ await ensureTrackingOnce(); await withRetry(()=>readTracking()); }
-    await Promise.all([pDir, pWorker]);
     buildRows(lastValues);
-    render();
+    render();                                   // statuses/notes visible now
+    pDir.then(()=>{ buildRows(lastValues); render(); });   // ✓/✗ indicators + picker once the directory lands
   }catch(e){
     showBanner("Requests are shown. Status/notes editing is briefly unavailable because the workbook is open for editing elsewhere — click Reload in a moment.","info");
   }
