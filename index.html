@@ -370,7 +370,7 @@ const CONFIG = {
   // Fallback sharing link (only used if driveId/itemId are blank):
   sharingUrl: "",
   // Optional: name of the worksheet that holds form responses. Leave "" to auto-detect (first non-Tracking sheet).
-  responseSheet: "",
+  responseSheet: "Sheet1",
   // Worksheet used to store shared status/notes (created automatically if missing):
   trackingSheet: "Tracking",
   trackingTable: "TrackingTable",
@@ -684,19 +684,22 @@ async function queueGrant(q){
   return id;
 }
 
+function parseTrackingRows(values){
+  (values||[]).forEach((row,i)=>{
+    const id=(row[0]||"").toString();
+    if(!id) return;
+    const rec={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", accessDays:(row[9]==null?"":row[9]), submitted:(row[10]==null?"":row[10]), submitMinLocal:(row[11]==null?"":row[11]),
+      policyId:cell(row,TC.policyId), hold:isTruthyCell(cell(row,TC.hold)), subjects:cell(row,TC.subjects), approvedBy:cell(row,TC.approvedBy), approvedAt:cell(row,TC.approvedAt), feature:cell(row,TC.feature), rowIndex:i };
+    // Dedupe: if the sheet has more than one row for this id, keep the most recently updated.
+    const prev=tracking[id];
+    if(!prev || String(rec.updatedAt) >= String(prev.updatedAt)) tracking[id]=rec;
+  });
+}
 async function readTracking(){
   tracking={};
   try {
     const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange?$select=values");
-    (r.values||[]).forEach((row,i)=>{
-      const id=(row[0]||"").toString();
-      if(!id) return;
-      const rec={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", accessDays:(row[9]==null?"":row[9]), submitted:(row[10]==null?"":row[10]), submitMinLocal:(row[11]==null?"":row[11]),
-        policyId:cell(row,TC.policyId), hold:isTruthyCell(cell(row,TC.hold)), subjects:cell(row,TC.subjects), approvedBy:cell(row,TC.approvedBy), approvedAt:cell(row,TC.approvedAt), feature:cell(row,TC.feature), rowIndex:i };
-      // Dedupe: if the sheet has more than one row for this id, keep the most recently updated.
-      const prev=tracking[id];
-      if(!prev || String(rec.updatedAt) >= String(prev.updatedAt)) tracking[id]=rec;
-    });
+    parseTrackingRows(r.values||[]);
   } catch(e){ /* table empty or missing rows -> ignore */ }
 }
 
@@ -711,6 +714,7 @@ async function saveTracking(rec){
   finally { delete __saveLocks[_id]; _rel(); }
 }
 async function saveTrackingInner(rec){
+  await ensureTrackingOnce();   // schema check once per session, before the first write
   const id=rec.id, status=rec.status||"Pending", notes=rec.notes||"", owner=rec.owner||"";
   const requester=rec.requester||"", content=rec.content||"";
   const who = (account && (account.name||account.username)) || "";
@@ -1339,12 +1343,25 @@ function exportCsv(){
    Boot
    ============================================================ */
 let lastValues=[];
+// The Tracking schema check (table exists + all columns) costs two Graph round-trips, so it runs once per
+// browser session, not on every load. A missing table on read still triggers it immediately.
+let TRACKING_CHECKED = false;
+async function ensureTrackingOnce(){
+  if(TRACKING_CHECKED) return;
+  await withRetry(()=>ensureTracking());
+  TRACKING_CHECKED = true;
+}
 async function loadData(){
   hideBanner(); $("loading").style.display="block"; $("tbl").style.display="none";
-  // 1) Read + show responses (reads work even if the workbook is open/locked elsewhere)
+  if(!DRIVE_ID){ try{ await resolveWorkbook(); }catch(err){ $("loading").style.display="none"; showBanner("Couldn't load data: "+err.message+" — click Reload to try again.","err"); return; } }
+  // Everything is read-only here, so fire all four reads at once instead of one after another.
+  const pResp   = withRetry(()=>readResponses());
+  const pTrack  = withRetry(()=>readTrackingStrict()).then(()=>true, ()=>false);
+  const pDir    = loadDirectory().catch(()=>{});
+  const pWorker = loadWorkerStatus().catch(()=>{});
+  // 1) Show the responses as soon as they arrive (tracking overlay follows a moment later)
   try{
-    if(!DRIVE_ID) await resolveWorkbook();
-    lastValues = await withRetry(()=>readResponses());
+    lastValues = await pResp;
     tracking = {};
     buildRows(lastValues);
     render();
@@ -1354,16 +1371,22 @@ async function loadData(){
     showBanner("Couldn't load data: "+err.message+" — click Reload to try again.","err");
     return;
   }
-  // 2) Load shared status/notes overlay (best effort — may be locked briefly)
+  // 2) Overlay shared status/notes (best effort — may be locked briefly)
   try{
-    await withRetry(()=>ensureTracking());
-    await withRetry(()=>readTracking());
-    await Promise.all([loadDirectory(), loadWorkerStatus()]);
+    let ok = await pTrack;
+    if(!ok){ await ensureTrackingOnce(); await withRetry(()=>readTracking()); }
+    await Promise.all([pDir, pWorker]);
     buildRows(lastValues);
     render();
   }catch(e){
     showBanner("Requests are shown. Status/notes editing is briefly unavailable because the workbook is open for editing elsewhere — click Reload in a moment.","info");
   }
+}
+// readTracking() swallows errors; this variant throws so loadData can tell "missing table" from "empty".
+async function readTrackingStrict(){
+  tracking={};
+  const r = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/dataBodyRange?$select=values");
+  parseTrackingRows(r.values||[]);
 }
 
 function initials(nm){
