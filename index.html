@@ -135,6 +135,9 @@
   input.days-in:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(21,96,246,.12); }
   input.days-in::placeholder{ color:#9aa6b8; }
   .policy-id{ font-size:11px; color:#8a93a6; }
+  .policy-name{ display:block; font-size:11px; font-family:ui-monospace,Consolas,monospace; color:#4b5563; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:6px; padding:3px 6px; margin-top:4px; max-width:220px; white-space:normal; word-break:break-word; cursor:copy; }
+  .policy-name:hover{ background:#e8ecf3; }
+  .policy-name.copied{ background:#dcfce7; border-color:#86efac; color:#15803d; }
   .req-scope{ margin-top:6px; font-size:11.5px; color:#516079; line-height:1.4; }
   .hold-lbl{ display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:#92600e; white-space:nowrap; cursor:pointer; }
   .hold-lbl input{ margin:0; }
@@ -794,6 +797,14 @@ function cleanType(t){ return typeList(t).join(", "); }
 function typePills(t){ return typeList(t).map(x=>`<span class="pill ${typeClass(x)}">${esc(x)}</span>`).join(" "); }
 function featuresForType(t){ const out=[]; typeList(t).forEach(x=>{ x=x.toLowerCase(); const f = x.indexOf("key")>=0?FEATURE_BY_TYPE.key : x.indexOf("video")>=0?FEATURE_BY_TYPE.video : x.indexOf("snap")>=0?FEATURE_BY_TYPE.snap : null; if(f && out.indexOf(f)<0) out.push(f); }); return out; }
 function featureLabels(f){ return String(f||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean).map(x=>FEATURE_LABELS[x]||x).join(", "); }
+// Name of the Access Control policy as the worker creates it in Teramind:
+//   ARC-<ResponseID> | <requester> | <features> | until <DD Mon YYYY>   (end date in UTC, same as the worker)
+function policyName(r){
+  const d=parseWhen(r.doneAt); const days=parseInt(r.accessDays,10)||CONFIG.accessDays;
+  let until="";
+  if(d){ const u=new Date(d.getTime()+days*86400000); until=u.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}); }
+  return `ARC-${r.id} | ${r.requester||""} | ${featureLabels(r.feature)||"—"}${until?" | until "+until:""}`;
+}
 function typeClass(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return "t-keystroke"; if(t.indexOf("snap")>=0) return "t-snapshot"; if(t.indexOf("video")>=0) return "t-video"; return ""; }
 function prioClass(p){ return "p-"+(p||"").toLowerCase().replace(/[^a-z]/g,""); }
 function statusClass(s){ return "s-"+(s||"").toLowerCase().replace(/[^a-z]/g,""); }
@@ -938,7 +949,7 @@ function render(){
       const daysVal=(r.accessDays==null||String(r.accessDays).trim()==="")?"":String(r.accessDays);
       const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
       const stLow=(r.status||"").toLowerCase();
-      const policyTag = r.policyId ? `<span class="policy-id" title="Teramind Access Control policy created by the automation">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</span>` : "";
+      const policyTag = r.policyId ? `<span class="policy-id" title="Teramind Access Control policy created by the automation (Manage → Access Control)">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</span><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>` : "";
       const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}> Hold</label>` : "";
       const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
@@ -995,6 +1006,11 @@ function wire(){
   $("tbody").addEventListener("blur", onEdit, true);
   $("tbody").addEventListener("click", onRevoke);
   $("tbody").addEventListener("click", onApproveClick);
+  $("tbody").addEventListener("click", (e)=>{
+    const el=e.target.closest('[data-act="copy-policy"]'); if(!el) return;
+    const txt=el.textContent; (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{
+      el.classList.add("copied"); setTimeout(()=>el.classList.remove("copied"),1200); }).catch(()=>{});
+  });
   $("gmCancel").onclick=closeGrantModal;
   $("gmConfirm").onclick=confirmGrant;
   $("gmFeature").addEventListener("change", updateTicketHint);
@@ -1262,11 +1278,11 @@ async function emailSheetLink(){
 }
 
 function exportCsv(){
-  const cols=[["submitted","Submitted"],["requester","Requester"],["type","Type"],["content","Content"],["priority","Priority"],["ticketRaised","Ticket raised"],["ticketId","Ticket ID"],["reqNotes","Requester notes"],["accessWindow","Access window (days)"],["accessState","Access"],["subjects","May view"],["policyId","Teramind policy ID"],["approvedBy","Approved by"],["approvedAt","Approved at"],["owner","Owner"],["status","Status"],["notes","Internal notes"]];
+  const cols=[["submitted","Submitted"],["requester","Requester"],["type","Type"],["content","Content"],["priority","Priority"],["ticketRaised","Ticket raised"],["ticketId","Ticket ID"],["reqNotes","Requester notes"],["accessWindow","Access window (days)"],["accessState","Access"],["subjects","May view"],["policyId","Teramind policy ID"],["policyName","Teramind policy name"],["approvedBy","Approved by"],["approvedAt","Approved at"],["owner","Owner"],["status","Status"],["notes","Internal notes"]];
   const lines=[cols.map(c=>c[1]).join(",")].concat(filtered().map(r=>{
     const ai=accessInfo(r);
     const ovr=(r.accessDays==null||String(r.accessDays).trim()==="")?NaN:Number(r.accessDays);
-    const x=Object.assign({},r,{type:cleanType(r.type), accessWindow:(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays, accessState:ai.text});
+    const x=Object.assign({},r,{type:cleanType(r.type), accessWindow:(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays, accessState:ai.text, policyName:r.policyId?policyName(r):""});
     return cols.map(c=>'"'+String(x[c[0]]==null?"":x[c[0]]).replace(/"/g,'""')+'"').join(",");
   }));
   const blob=new Blob([lines.join("\n")],{type:"text/csv"});
