@@ -134,6 +134,28 @@
   input.days-in{ width:56px; padding:5px 7px; border:1px solid var(--line); border-radius:8px; font:inherit; font-size:13px; text-align:right; }
   input.days-in:focus{ outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(21,96,246,.12); }
   input.days-in::placeholder{ color:#9aa6b8; }
+  .policy-id{ font-size:11px; color:#8a93a6; }
+  .hold-lbl{ display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:#92600e; white-space:nowrap; cursor:pointer; }
+  .hold-lbl input{ margin:0; }
+  .btn-approve{ background:var(--brand); color:#fff; border:1px solid var(--brand); padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }
+  .btn-approve:hover{ filter:brightness(1.08); } .btn-approve:disabled{ opacity:.5; cursor:default; }
+  .act-cell{ display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+  select.status-sel.s-approved{ background:#ede9fe; }
+  .exp-queued{ background:#ede9fe; color:#5b21b6; }
+  /* ---------- MODAL ---------- */
+  .modal-bg{ position:fixed; inset:0; background:rgba(15,31,61,.45); display:none; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .modal-bg.open{ display:flex; }
+  .modal{ background:#fff; border-radius:16px; width:560px; max-width:100%; max-height:92vh; overflow:auto; box-shadow:0 20px 60px rgba(15,31,61,.3); }
+  .modal h2{ font-size:17px; margin:0; padding:18px 22px 12px; }
+  .modal .m-body{ padding:0 22px 8px; display:grid; gap:12px; }
+  .modal label{ display:block; font-size:12px; font-weight:600; color:#516079; margin-bottom:4px; }
+  .modal input[type=text], .modal input[type=number], .modal select, .modal textarea{ width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; box-sizing:border-box; }
+  .modal textarea{ min-height:84px; resize:vertical; }
+  .modal .hint{ font-size:11.5px; color:#8a93a6; margin-top:3px; }
+  .modal .m-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .modal .m-foot{ display:flex; justify-content:flex-end; gap:10px; padding:14px 22px 20px; border-top:1px solid var(--line2); margin-top:8px; }
+  .modal .m-warn{ background:#fef3c7; color:#92600e; border:1px solid #fde68a; border-radius:9px; padding:9px 12px; font-size:12.5px; }
+  .modal .m-err{ color:#b42318; font-size:12.5px; display:none; }
   .btn-del{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; }
   .btn-del:hover{ background:#fef2f2; } .btn-del:disabled{ opacity:.55; cursor:default; }
   select.owner-sel{ padding:6px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; color:#33405a; max-width:150px; }
@@ -220,7 +242,7 @@
               <input class="search" id="search" placeholder="Search requester, content, notes…">
             </div>
             <select id="fType"><option value="">All types</option><option>Keystroke</option><option>Snapshot</option><option>Video Playback</option></select>
-            <select id="fStatus"><option value="">All statuses</option><option>Pending</option><option>In progress</option><option>Done</option><option>Revoked</option></select>
+            <select id="fStatus"><option value="">All statuses</option><option>Pending</option><option>In progress</option><option>Approved</option><option>Done</option><option>Revoked</option></select>
             <select id="fPriority"><option value="">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select>
             <div class="spacer"></div>
             <button class="btn-ghost" id="exportBtn">Export CSV</button>
@@ -248,6 +270,41 @@
           </div>
           <div class="foot" id="foot"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ APPROVE & GRANT MODAL ============ -->
+  <div class="modal-bg" id="grantModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="gmTitle">
+      <h2 id="gmTitle">Approve &amp; grant Teramind access</h2>
+      <div class="m-body">
+        <div class="m-warn">Approving queues the grant. The automation creates a scoped Access Control policy in Teramind within a few minutes, records the policy ID here, sets the request to <strong>Done</strong>, and emails the requester. Access is removed automatically when the window ends.</div>
+        <div class="m-row">
+          <div><label>Requester</label><input type="text" id="gmRequester" readonly></div>
+          <div><label>Requester email (Teramind login)</label><input type="text" id="gmEmail" placeholder="name@go.team"><div class="hint">Must match the employee's email in Teramind.</div></div>
+        </div>
+        <div class="m-row">
+          <div><label>Access to grant</label>
+            <select id="gmFeature">
+              <option value="reports.snapshots">Snapshots (View Snapshots report)</option>
+              <option value="reports.keystrokes">Keystrokes (View Keystrokes report)</option>
+              <option value="player.history">Video playback (Play historic screen stream)</option>
+            </select></div>
+          <div><label>Access window (days)</label><input type="number" id="gmDays" min="1" max="365" step="1"></div>
+        </div>
+        <div><label>Who they may view (one per line)</label>
+          <textarea id="gmSubjects" placeholder="Heffernan Network Insurance Brokers&#10;jane.doe@go.team"></textarea>
+          <div class="hint">Enter Teramind department names exactly as shown in Teramind, or team members' email addresses. The automation rejects anything it can't match.</div></div>
+        <div class="m-row">
+          <div><label>Ticket</label><input type="text" id="gmTicket" placeholder="e.g. INC-1234"><div class="hint" id="gmTicketHint">Required for keystroke access.</div></div>
+          <div><label>Approved by</label><input type="text" id="gmApprover" readonly></div>
+        </div>
+        <div class="m-err" id="gmErr"></div>
+      </div>
+      <div class="m-foot">
+        <button class="btn-ghost" id="gmCancel">Cancel</button>
+        <button class="btn-approve" id="gmConfirm">Approve &amp; queue grant</button>
       </div>
     </div>
   </div>
@@ -295,8 +352,17 @@ const FIELD_MATCHERS = {
   priority:  ["priority"],
   reqNotes:  ["notes"],
   ticketRaised: ["ticket raised","raised"],
-  ticketId:  ["ticket id","ticket number","ticket"]
+  ticketId:  ["ticket id","ticket number","ticket"],
+  email:     ["email"]
 };
+// Request type -> Teramind Access Control feature created by the grant automation.
+const FEATURE_BY_TYPE = { key:"reports.keystrokes", snap:"reports.snapshots", video:"player.history" };
+const FEATURE_LABELS = { "reports.snapshots":"Snapshots", "reports.keystrokes":"Keystrokes", "player.history":"Video playback" };
+// Grant queue (sheet + table) polled by the Power Automate "ARC Grant" flow.
+const GRANT_SHEET="GrantQueue", GRANT_TABLE="GrantQueueTable";
+const GRANT_COLS=["Id","ResponseID","RequesterName","RequesterEmail","Feature","Subjects","AccessDays","Ticket","ApprovedBy","ApprovedAt","Status","PolicyId","Message","ProcessedAt"];
+// Extra Tracking columns (appended after SubmitMinLocal, in this order).
+const TRACK_EXTRA=["PolicyId","Hold","Subjects","ApprovedBy","ApprovedAt","Feature"];
 
 /* ============================================================
    MSAL setup
@@ -384,8 +450,9 @@ function itemBase(){ return "/drives/"+DRIVE_ID+"/items/"+ITEM_ID; }
 async function readResponses(){
   if(!RESP_SHEET){
     const sheets = await listSheets();
+    const internal=[CONFIG.trackingSheet, OUTBOX_SHEET, GRANT_SHEET];
     RESP_SHEET = CONFIG.responseSheet ||
-      sheets.find(n => n !== CONFIG.trackingSheet) || sheets[0];
+      sheets.find(n => internal.indexOf(n)<0) || sheets[0];
   }
   const r = await graph(itemBase()+"/workbook/worksheets('"+encodeURIComponent(RESP_SHEET)+"')/usedRange(valuesOnly=true)?$select=values");
   return r.values || [];
@@ -419,11 +486,13 @@ async function ensureTracking(){
     if(sheets.indexOf(CONFIG.trackingSheet)<0){
       await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:CONFIG.trackingSheet})});
     }
-    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content | AccessDays | Submitted | SubmitMinLocal
-    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:L1')",
-      {method:"PATCH",body:JSON.stringify({values:[["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content","AccessDays","Submitted","SubmitMinLocal"]]})});
+    // Header row: ResponseID | Status | Notes | Owner | UpdatedBy | UpdatedAt | DoneAt | Requester | Content | AccessDays | Submitted | SubmitMinLocal | PolicyId | Hold | Subjects | ApprovedBy | ApprovedAt | Feature
+    const hdr=["ResponseID","Status","Notes","Owner","UpdatedBy","UpdatedAt","DoneAt","Requester","Content","AccessDays","Submitted","SubmitMinLocal"].concat(TRACK_EXTRA);
+    const lastCol=String.fromCharCode(64+hdr.length);   // 18 cols -> R
+    await graph(itemBase()+"/workbook/worksheets('"+CONFIG.trackingSheet+"')/range(address='A1:"+lastCol+"1')",
+      {method:"PATCH",body:JSON.stringify({values:[hdr]})});
     await graph(itemBase()+"/workbook/tables/add",
-      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:L1",hasHeaders:true})});
+      {method:"POST",body:JSON.stringify({address:CONFIG.trackingSheet+"!A1:"+lastCol+"1",hasHeaders:true})});
     const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
     const t = tbls.value[tbls.value.length-1];
     await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:CONFIG.trackingTable})});
@@ -434,10 +503,39 @@ async function ensureTracking(){
     const cols = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns?$select=name");
     let names = (cols.value||[]).map(c=>c.name);
     if(names.indexOf("Owner")<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:"Owner",index:3})}); names.push("Owner"); }
-    for(const col of ["DoneAt","Requester","Content","AccessDays","Submitted","SubmitMinLocal"]){
+    for(const col of ["DoneAt","Requester","Content","AccessDays","Submitted","SubmitMinLocal"].concat(TRACK_EXTRA)){
       if(names.indexOf(col)<0){ await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/columns",{method:"POST",body:JSON.stringify({name:col})}); names.push(col); }
     }
   }catch(e){ /* column check best-effort */ }
+}
+// Tracking column order (0-based): ResponseID 0 | Status 1 | Notes 2 | Owner 3 | UpdatedBy 4 | UpdatedAt 5 | DoneAt 6 |
+// Requester 7 | Content 8 | AccessDays 9 | Submitted 10 | SubmitMinLocal 11 | PolicyId 12 | Hold 13 | Subjects 14 | ApprovedBy 15 | ApprovedAt 16 | Feature 17
+const TC={ policyId:12, hold:13, subjects:14, approvedBy:15, approvedAt:16, feature:17 };
+function cell(row,i){ return (row && row[i]!=null) ? row[i] : ""; }
+function isTruthyCell(v){ v=String(v==null?"":v).trim().toLowerCase(); return v==="1"||v==="true"||v==="yes"||v==="x"; }
+
+async function ensureGrantQueue(){
+  try{ await graph(itemBase()+"/workbook/tables/"+GRANT_TABLE+"?$select=name"); return; }
+  catch(e){ /* create below */ }
+  const sheets = await listSheets();
+  if(sheets.indexOf(GRANT_SHEET)<0){
+    await graph(itemBase()+"/workbook/worksheets/add",{method:"POST",body:JSON.stringify({name:GRANT_SHEET})});
+  }
+  const lastCol=String.fromCharCode(64+GRANT_COLS.length);   // 14 cols -> N
+  await graph(itemBase()+"/workbook/worksheets('"+GRANT_SHEET+"')/range(address='A1:"+lastCol+"1')",
+    {method:"PATCH",body:JSON.stringify({values:[GRANT_COLS]})});
+  await graph(itemBase()+"/workbook/tables/add",
+    {method:"POST",body:JSON.stringify({address:GRANT_SHEET+"!A1:"+lastCol+"1",hasHeaders:true})});
+  const tbls = await graph(itemBase()+"/workbook/tables?$select=id,name");
+  const t = tbls.value[tbls.value.length-1];
+  await graph(itemBase()+"/workbook/tables/"+t.id,{method:"PATCH",body:JSON.stringify({name:GRANT_TABLE})});
+}
+async function queueGrant(q){
+  await withRetry(()=>ensureGrantQueue());
+  const id = (window.crypto&&crypto.randomUUID) ? crypto.randomUUID() : ("gq"+Date.now());
+  const vals=[[id, q.responseId, q.requesterName, q.requesterEmail, q.feature, q.subjects, q.accessDays, q.ticket, q.approvedBy, q.approvedAt, "Queued", "", "", ""]];
+  await withRetry(()=>graph(itemBase()+"/workbook/tables/"+GRANT_TABLE+"/rows/add",{method:"POST",body:JSON.stringify({values:vals})}));
+  return id;
 }
 
 async function readTracking(){
@@ -447,7 +545,8 @@ async function readTracking(){
     (r.values||[]).forEach((row,i)=>{
       const id=(row[0]||"").toString();
       if(!id) return;
-      const rec={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", accessDays:(row[9]==null?"":row[9]), submitted:(row[10]==null?"":row[10]), rowIndex:i };
+      const rec={ status:row[1]||"Pending", notes:row[2]||"", owner:row[3]||"", updatedBy:row[4]||"", updatedAt:row[5]||"", doneAt:row[6]||"", accessDays:(row[9]==null?"":row[9]), submitted:(row[10]==null?"":row[10]), submitMinLocal:(row[11]==null?"":row[11]),
+        policyId:cell(row,TC.policyId), hold:isTruthyCell(cell(row,TC.hold)), subjects:cell(row,TC.subjects), approvedBy:cell(row,TC.approvedBy), approvedAt:cell(row,TC.approvedAt), feature:cell(row,TC.feature), rowIndex:i };
       // Dedupe: if the sheet has more than one row for this id, keep the most recently updated.
       const prev=tracking[id];
       if(!prev || String(rec.updatedAt) >= String(prev.updatedAt)) tracking[id]=rec;
@@ -477,7 +576,8 @@ async function saveTrackingInner(rec){
     try{
       const rr = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows?$select=index,values");
       const match=(rr.value||[]).find(x=>((x.values&&x.values[0]&&x.values[0][0])+"")===(id+""));
-      if(match){ existing={ doneAt:(match.values[0][6]||""), accessDays:(match.values[0][9]==null?"":match.values[0][9]), submitted:(match.values[0][10]==null?"":match.values[0][10]), rowIndex:match.index }; }
+      if(match){ const mv=match.values[0]; existing={ doneAt:(mv[6]||""), accessDays:(mv[9]==null?"":mv[9]), submitted:(mv[10]==null?"":mv[10]), submitMinLocal:(mv[11]==null?"":mv[11]),
+        policyId:cell(mv,TC.policyId), hold:isTruthyCell(cell(mv,TC.hold)), subjects:cell(mv,TC.subjects), approvedBy:cell(mv,TC.approvedBy), approvedAt:cell(mv,TC.approvedAt), feature:cell(mv,TC.feature), rowIndex:match.index }; }
     }catch(e){ /* best effort */ }
   }
   // DoneAt (kept for the audit trail; countdown no longer depends on it).
@@ -493,16 +593,22 @@ async function saveTrackingInner(rec){
   let submitMinLocal = existing ? (existing.submitMinLocal==null?"":existing.submitMinLocal) : "";
   const subD = parseWhen(rec.submitted);
   if(subD){ submitted = subD.toISOString(); submitMinLocal = subD.getHours()*60 + subD.getMinutes(); }
-  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content, accessDays, submitted, submitMinLocal]];
+  // Grant/revoke bookkeeping. PolicyId is owned by the automation: the dashboard never invents one,
+  // it only carries forward what the sheet already holds (or what the row record explicitly sets).
+  const pick=(k)=> (rec[k]!==undefined && rec[k]!==null) ? rec[k] : (existing && existing[k]!=null ? existing[k] : "");
+  const policyId=pick("policyId"), subjects=pick("subjects"), approvedBy=pick("approvedBy"), approvedAt=pick("approvedAt"), feature=pick("feature");
+  const holdRaw=pick("hold"); const hold = (holdRaw===true||holdRaw===1||isTruthyCell(holdRaw)) ? 1 : "";
+  const vals = [[id, status, notes, owner, who, when, doneAt, requester, content, accessDays, submitted, submitMinLocal, policyId, hold, subjects, approvedBy, approvedAt, feature]];
+  const snap={status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content,accessDays,submitted,submitMinLocal,policyId,hold:hold===1,subjects,approvedBy,approvedAt,feature};
   if(existing && typeof existing.rowIndex==="number"){
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+existing.rowIndex+")",
       {method:"PATCH",body:JSON.stringify({values:vals})});
-    Object.assign(existing,{status,notes,owner,updatedBy:who,updatedAt:when,doneAt,requester,content,accessDays,submitted,submitMinLocal});
+    Object.assign(existing,snap);
     tracking[id]=existing;
   } else {
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/add",
       {method:"POST",body:JSON.stringify({values:vals})});
-    tracking[id]={ status, notes, owner, updatedBy:who, updatedAt:when, doneAt, requester, content, accessDays, submitted, submitMinLocal, rowIndex:Object.keys(tracking).length };
+    tracking[id]=Object.assign({ rowIndex:Object.keys(tracking).length }, snap);
   }
 }
 
@@ -530,6 +636,7 @@ function parseWhen(v){
 // Countdown starts when the request is marked Done (access granted). Before that: "Awaiting grant".
 function accessInfo(r){
   const st=((r&&r.status)||"").toLowerCase();
+  if(st==="approved") return { cls:"exp-queued", text:"Granting…", expired:false, daysLeft:null };
   if(st!=="done") return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
   const d=parseWhen(r.doneAt) || parseWhen(r.updatedAt);   // updatedAt = fallback for legacy Done rows
   if(!d) return { cls:"exp-await", text:"Awaiting grant", expired:false, daysLeft:null };
@@ -539,7 +646,7 @@ function accessInfo(r){
   const deadline=new Date(d.getTime()+days*86400000);
   const ms=deadline.getTime()-Date.now();
   const daysLeft=Math.ceil(ms/86400000);
-  if(ms<=0){ const over=Math.abs(daysLeft); return { cls:"exp-over", text:"Delete access"+(over>0?" ("+over+"d ago)":""), expired:true, daysLeft }; }
+  if(ms<=0){ const over=Math.abs(daysLeft); if(r.hold) return { cls:"exp-warn", text:"On hold"+(over>0?" ("+over+"d over)":""), expired:true, daysLeft }; return { cls:"exp-over", text:"Expired"+(over>0?" ("+over+"d ago)":""), expired:true, daysLeft }; }
   return { cls:(daysLeft<=2?"exp-warn":"exp-ok"), text:daysLeft+" day"+(daysLeft===1?"":"s")+" left", expired:false, daysLeft };
 }
 function cleanType(t){ return (t||"").replace(/[;,\s]+$/,"").trim(); }
@@ -573,7 +680,14 @@ function buildRows(values){
       updatedBy: track.updatedBy || "",
       updatedAt: track.updatedAt || "",
       doneAt: track.doneAt || "",
-      accessDays: (track.accessDays==null?"":track.accessDays)
+      accessDays: (track.accessDays==null?"":track.accessDays),
+      email: get("email"),
+      policyId: track.policyId || "",
+      hold: !!track.hold,
+      subjects: track.subjects || "",
+      approvedBy: track.approvedBy || "",
+      approvedAt: track.approvedAt || "",
+      feature: track.feature || ""
     });
   }
 }
@@ -590,7 +704,7 @@ function filtered(){
     if(q){ const hay=(r.requester+" "+r.content+" "+r.reqNotes+" "+r.notes+" "+r.ticketId+" "+r.owner+" "+r.updatedBy).toLowerCase(); if(hay.indexOf(q)<0) return false; }
     return true;
   });
-  const pr={high:3,medium:2,low:1}, st={pending:1,"in progress":2,done:3};
+  const pr={high:3,medium:2,low:1}, st={pending:1,"in progress":2,approved:3,done:4,revoked:5};
   out.sort((a,b)=>{
     let av=a[sortKey], bv=b[sortKey];
     if(sortKey==="priority"){ av=pr[(av||"").toLowerCase()]||0; bv=pr[(bv||"").toLowerCase()]||0; }
@@ -620,7 +734,7 @@ function renderStats(){
     const s=(r.status||"").toLowerCase();
     if(s==="revoked"){ revoked++; return; }   // revoked = archived, excluded from active stats
     total++;
-    if(s==="pending")pend++; else if(s==="in progress")prog++; else if(s==="done")done++;
+    if(s==="pending")pend++; else if(s==="in progress"||s==="approved")prog++; else if(s==="done")done++;
     const t=(r.type||"").toLowerCase();
     if(t.indexOf("key")>=0)keys++; if(t.indexOf("snap")>=0)snaps++; if(t.indexOf("video")>=0)vids++;
     if(accessInfo(r).expired) expired++;
@@ -651,7 +765,7 @@ function render(){
     tb.innerHTML=list.map(r=>{
       const ticket = (r.ticketRaised||"").toString().toLowerCase().indexOf("yes")>=0
         ? `<span class="yes">${esc(r.ticketId||"Yes")}</span>` : `<span class="no">—</span>`;
-      const opts=["Pending","In progress","Done","Revoked"].map(o=>`<option${o===r.status?" selected":""}>${o}</option>`).join("");
+      const opts=["Pending","In progress","Approved","Done","Revoked"].map(o=>`<option${o===r.status?" selected":""}>${o}</option>`).join("");
       const ownerOpts=`<option value=""${r.owner?"":" selected"}>Unassigned</option>`+
         (CONFIG.owners||[]).map(o=>`<option${o===r.owner?" selected":""}>${esc(o)}</option>`).join("");
       const ai=accessInfo(r);
@@ -660,12 +774,17 @@ function render(){
       const isRev=(r.status||"").toLowerCase()==="revoked";
       const daysVal=(r.accessDays==null||String(r.accessDays).trim()==="")?"":String(r.accessDays);
       const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
-      const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span></div>`;
+      const stLow=(r.status||"").toLowerCase();
+      const policyTag = r.policyId ? `<span class="policy-id" title="Teramind Access Control policy created by the automation">policy #${esc(r.policyId)}${r.feature?" · "+esc(FEATURE_LABELS[r.feature]||r.feature):""}</span>` : "";
+      const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}> Hold</label>` : "";
+      const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
-      const isRevoked=(r.status||"").toLowerCase()==="revoked";
+      const isRevoked=stLow==="revoked";
+      const canApprove = (stLow==="pending"||stLow==="in progress");
+      const approveBtn = canApprove ? `<button class="btn-approve" data-act="approve" title="Approve this request and queue the Teramind grant"${r.owner?"":" disabled"}>Approve &amp; grant</button>${r.owner?"":'<span class="muted" style="font-size:11px">Assign an owner first</span>'}` : "";
       const actionCell = isRevoked
         ? '<span class="muted">Revoked</span>'
-        : '<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button>';
+        : `<div class="act-cell">${approveBtn}<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button></div>`;
       return `<tr data-id="${esc(r.id)}">
         <td>${esc(fmt(r.submitted))}</td>
         <td>${esc(r.requester)}</td>
@@ -712,19 +831,27 @@ function wire(){
   $("tbody").addEventListener("change", onEdit);
   $("tbody").addEventListener("blur", onEdit, true);
   $("tbody").addEventListener("click", onRevoke);
+  $("tbody").addEventListener("click", onApproveClick);
+  $("gmCancel").onclick=closeGrantModal;
+  $("gmConfirm").onclick=confirmGrant;
+  $("gmFeature").onchange=()=>{ $("gmTicketHint").textContent = $("gmFeature").value==="reports.keystrokes" ? "Required for keystroke access." : "Optional."; };
+  $("grantModal").addEventListener("click",(e)=>{ if(e.target===$("grantModal")) closeGrantModal(); });
+  document.addEventListener("keydown",(e)=>{ if(e.key==="Escape" && $("grantModal").classList.contains("open")) closeGrantModal(); });
   $("reloadBtn").onclick=loadData;
   $("exportBtn").onclick=exportCsv;
   $("copyLinkBtn").onclick=(e)=>copySheetLink(e.currentTarget);
   $("emailLinkBtn").onclick=emailSheetLink;
 }
 async function onEdit(e){
-  const act=e.target.getAttribute("data-act"); if(!act || act==="revoke") return;
+  const act=e.target.getAttribute("data-act"); if(!act || act==="revoke" || act==="approve") return;
   const tr=e.target.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const sel=tr.querySelector('[data-act="status"]'), inp=tr.querySelector('[data-act="notes"]'), own=tr.querySelector('[data-act="owner"]');
   if(sel){ rec.status=sel.value; sel.className="status-sel "+statusClass(rec.status); }
   if(inp) rec.notes=inp.value;
   if(own) rec.owner=own.value;
+  const holdIn=tr.querySelector('[data-act="hold"]');
+  if(holdIn) rec.hold=holdIn.checked;
   const dayIn=tr.querySelector('[data-act="days"]');
   if(dayIn){
     const raw=dayIn.value.trim();
@@ -738,11 +865,69 @@ async function onEdit(e){
   const badge=tr.querySelector('[data-role="save"]'); if(badge) badge.textContent="saving…";
   try{
     await withRetry(()=>saveTracking(rec));
-    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.owner=t.owner; rec.doneAt=t.doneAt; rec.accessDays=t.accessDays; }
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; rec.owner=t.owner; rec.doneAt=t.doneAt; rec.accessDays=t.accessDays; rec.hold=!!t.hold; }
     if(badge){ badge.textContent="saved"; setTimeout(()=>badge.textContent="",1500); }
     render();
   }
   catch(err){ if(badge) badge.textContent=""; showBanner("Couldn't save change: "+err.message,"err"); }
+}
+
+/* ---- Approve & grant (human approval -> GrantQueue row -> Power Automate creates the Teramind policy) ---- */
+let grantTarget=null;
+function featureForType(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return FEATURE_BY_TYPE.key; if(t.indexOf("video")>=0) return FEATURE_BY_TYPE.video; return FEATURE_BY_TYPE.snap; }
+function openGrantModal(rec){
+  grantTarget=rec;
+  $("gmRequester").value=rec.requester||"";
+  $("gmEmail").value=(rec.email||"").trim() || ((/@/.test(rec.requester||""))?rec.requester.trim():"");
+  $("gmFeature").value=rec.feature||featureForType(rec.type);
+  const ovr=(rec.accessDays==null||String(rec.accessDays).trim()==="")?CONFIG.accessDays:Number(rec.accessDays);
+  $("gmDays").value=(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays;
+  $("gmSubjects").value=rec.subjects||"";
+  $("gmTicket").value=rec.ticketId||"";
+  $("gmApprover").value=(account&&(account.name||account.username))||"";
+  $("gmTicketHint").textContent = $("gmFeature").value==="reports.keystrokes" ? "Required for keystroke access." : "Optional.";
+  $("gmErr").style.display="none"; $("gmErr").textContent="";
+  $("gmConfirm").disabled=false; $("gmConfirm").textContent="Approve & queue grant";
+  $("grantModal").classList.add("open");
+  setTimeout(()=>$("gmSubjects").focus(),50);
+}
+function closeGrantModal(){ $("grantModal").classList.remove("open"); grantTarget=null; }
+function gmError(msg){ const el=$("gmErr"); el.textContent=msg; el.style.display="block"; }
+async function confirmGrant(){
+  const rec=grantTarget; if(!rec) return;
+  const email=$("gmEmail").value.trim().toLowerCase();
+  const feature=$("gmFeature").value;
+  const days=parseInt($("gmDays").value,10);
+  const subjects=$("gmSubjects").value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+  const ticket=$("gmTicket").value.trim();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return gmError("Enter the requester's email address as it appears in Teramind.");
+  if(isNaN(days)||days<1||days>365) return gmError("Access window must be between 1 and 365 days.");
+  if(!subjects.length) return gmError("Enter at least one department name or team-member email the requester may view.");
+  if(feature==="reports.keystrokes" && !ticket) return gmError("A ticket number is required for keystroke access.");
+  const who=(account&&(account.name||account.username))||"";
+  const isOwner = !(CONFIG.owners&&CONFIG.owners.length) || CONFIG.owners.some(o=>o.trim().toLowerCase()===who.trim().toLowerCase());
+  if(!isOwner) return gmError("Only the IT owners listed in the dashboard configuration can approve requests (signed in as "+who+").");
+  const when=new Date().toISOString();
+  $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
+  try{
+    if(!DRIVE_ID) await resolveWorkbook();
+    await queueGrant({ responseId:rec.id, requesterName:rec.requester||"", requesterEmail:email, feature, subjects:subjects.join("; "), accessDays:days, ticket, approvedBy:who, approvedAt:when });
+    rec.status="Approved"; rec.accessDays=days; rec.subjects=subjects.join("; "); rec.approvedBy=who; rec.approvedAt=when; rec.feature=feature;
+    if(ticket && !rec.ticketId) rec.notes=(rec.notes?rec.notes+" | ":"")+"Ticket "+ticket;
+    await withRetry(()=>saveTracking(rec));
+    const t=tracking[rec.id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; }
+    closeGrantModal(); render();
+    showBanner("Approved. The grant is queued — Teramind access for "+(rec.requester||email)+" will be created by the automation within a few minutes and the request will move to Done.","info");
+  }catch(err){
+    $("gmConfirm").disabled=false; $("gmConfirm").textContent="Approve & queue grant";
+    gmError("Couldn't queue the grant: "+((err&&err.message)||err));
+  }
+}
+function onApproveClick(e){
+  const btn=e.target.closest('[data-act="approve"]'); if(!btn) return;
+  const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
+  const rec=rows.find(x=>x.id===id); if(!rec) return;
+  openGrantModal(rec);
 }
 
 /* Locate the row in the responses table by its Forms ID, then delete it. */
@@ -764,7 +949,8 @@ async function onRevoke(e){
   const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const label=rec.requester||rec.content||("request "+id);
-  if(!confirm("Revoke access for this request?\n\n"+label+"\n\nThe record is kept and marked \"Revoked\" (logged with your name and today's date). You can restore it later via the Status dropdown, or view revoked items with the status filter.")) return;
+  const tmNote = rec.policyId ? "\n\nTeramind policy #"+rec.policyId+" will be deleted by the automation within a few minutes." : "";
+  if(!confirm("Revoke access for this request?\n\n"+label+tmNote+"\n\nThe record is kept and marked \"Revoked\" (logged with your name and today's date). You can view revoked items with the status filter.")) return;
   btn.textContent="Revoking…"; btn.disabled=true;
   try{
     rec.status="Revoked";
@@ -831,7 +1017,7 @@ async function emailSheetLink(){
 }
 
 function exportCsv(){
-  const cols=[["submitted","Submitted"],["requester","Requester"],["type","Type"],["content","Content"],["priority","Priority"],["ticketRaised","Ticket raised"],["ticketId","Ticket ID"],["reqNotes","Requester notes"],["accessWindow","Access window (days)"],["accessState","Access"],["owner","Owner"],["status","Status"],["notes","Internal notes"]];
+  const cols=[["submitted","Submitted"],["requester","Requester"],["type","Type"],["content","Content"],["priority","Priority"],["ticketRaised","Ticket raised"],["ticketId","Ticket ID"],["reqNotes","Requester notes"],["accessWindow","Access window (days)"],["accessState","Access"],["subjects","May view"],["policyId","Teramind policy ID"],["approvedBy","Approved by"],["approvedAt","Approved at"],["owner","Owner"],["status","Status"],["notes","Internal notes"]];
   const lines=[cols.map(c=>c[1]).join(",")].concat(filtered().map(r=>{
     const ai=accessInfo(r);
     const ovr=(r.accessDays==null||String(r.accessDays).trim()==="")?NaN:Number(r.accessDays);
