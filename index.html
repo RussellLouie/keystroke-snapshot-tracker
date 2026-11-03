@@ -154,6 +154,9 @@
   .modal .hint{ font-size:11.5px; color:#8a93a6; margin-top:3px; }
   .modal .m-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .modal .m-foot{ display:flex; justify-content:flex-end; gap:10px; padding:14px 22px 20px; border-top:1px solid var(--line2); margin-top:8px; }
+  .modal .feat-list{ display:grid; gap:6px; padding:4px 0; }
+  .modal .feat{ display:flex; align-items:center; gap:8px; font-weight:500; font-size:13.5px; color:#1f2a44; margin:0; cursor:pointer; }
+  .modal .feat input{ margin:0; } .modal .feat .hint{ margin:0; }
   .modal .m-warn{ background:#fef3c7; color:#92600e; border:1px solid #fde68a; border-radius:9px; padding:9px 12px; font-size:12.5px; }
   .modal .m-err{ color:#b42318; font-size:12.5px; display:none; }
   .btn-del{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; }
@@ -286,11 +289,11 @@
         </div>
         <div class="m-row">
           <div><label>Access to grant</label>
-            <select id="gmFeature">
-              <option value="reports.snapshots">Snapshots (View Snapshots report)</option>
-              <option value="reports.keystrokes">Keystrokes (View Keystrokes report)</option>
-              <option value="player.history">Video playback (Play historic screen stream)</option>
-            </select></div>
+            <div id="gmFeature" class="feat-list">
+              <label class="feat"><input type="checkbox" value="reports.snapshots"> Snapshots <span class="hint">View Snapshots report</span></label>
+              <label class="feat"><input type="checkbox" value="reports.keystrokes"> Keystrokes <span class="hint">View Keystrokes report</span></label>
+              <label class="feat"><input type="checkbox" value="player.history"> Video playback <span class="hint">Play historic screen stream</span></label>
+            </div></div>
           <div><label>Access window (days)</label><input type="number" id="gmDays" min="1" max="365" step="1"></div>
         </div>
         <div><label>Who they may view (one per line)</label>
@@ -649,7 +652,16 @@ function accessInfo(r){
   if(ms<=0){ const over=Math.abs(daysLeft); if(r.hold) return { cls:"exp-warn", text:"On hold"+(over>0?" ("+over+"d over)":""), expired:true, daysLeft }; return { cls:"exp-over", text:"Expired"+(over>0?" ("+over+"d ago)":""), expired:true, daysLeft }; }
   return { cls:(daysLeft<=2?"exp-warn":"exp-ok"), text:daysLeft+" day"+(daysLeft===1?"":"s")+" left", expired:false, daysLeft };
 }
-function cleanType(t){ return (t||"").replace(/[;,\s]+$/,"").trim(); }
+// Forms multi-select answers arrive as a JSON array string, e.g. ["Keystroke","Snapshot"]; older rows as "Snapshot;".
+function typeList(t){
+  t=(t==null?"":String(t)).trim(); if(!t) return [];
+  if(t[0]==="["){ try{ const a=JSON.parse(t); if(Array.isArray(a)) return a.map(x=>String(x).trim()).filter(Boolean); }catch(e){} }
+  return t.split(/[;,]/).map(x=>x.trim()).filter(Boolean);
+}
+function cleanType(t){ return typeList(t).join(", "); }
+function typePills(t){ return typeList(t).map(x=>`<span class="pill ${typeClass(x)}">${esc(x)}</span>`).join(" "); }
+function featuresForType(t){ const out=[]; typeList(t).forEach(x=>{ x=x.toLowerCase(); const f = x.indexOf("key")>=0?FEATURE_BY_TYPE.key : x.indexOf("video")>=0?FEATURE_BY_TYPE.video : x.indexOf("snap")>=0?FEATURE_BY_TYPE.snap : null; if(f && out.indexOf(f)<0) out.push(f); }); return out; }
+function featureLabels(f){ return String(f||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean).map(x=>FEATURE_LABELS[x]||x).join(", "); }
 function typeClass(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return "t-keystroke"; if(t.indexOf("snap")>=0) return "t-snapshot"; if(t.indexOf("video")>=0) return "t-video"; return ""; }
 function prioClass(p){ return "p-"+(p||"").toLowerCase().replace(/[^a-z]/g,""); }
 function statusClass(s){ return "s-"+(s||"").toLowerCase().replace(/[^a-z]/g,""); }
@@ -775,7 +787,7 @@ function render(){
       const daysVal=(r.accessDays==null||String(r.accessDays).trim()==="")?"":String(r.accessDays);
       const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
       const stLow=(r.status||"").toLowerCase();
-      const policyTag = r.policyId ? `<span class="policy-id" title="Teramind Access Control policy created by the automation">policy #${esc(r.policyId)}${r.feature?" · "+esc(FEATURE_LABELS[r.feature]||r.feature):""}</span>` : "";
+      const policyTag = r.policyId ? `<span class="policy-id" title="Teramind Access Control policy created by the automation">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</span>` : "";
       const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}> Hold</label>` : "";
       const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
@@ -788,7 +800,7 @@ function render(){
       return `<tr data-id="${esc(r.id)}">
         <td>${esc(fmt(r.submitted))}</td>
         <td>${esc(r.requester)}</td>
-        <td>${r.type?`<span class="pill ${typeClass(r.type)}">${esc(cleanType(r.type))}</span>`:""}</td>
+        <td style="white-space:nowrap">${typePills(r.type)}</td>
         <td class="content">${r.content?`<div class="clamp" title="${esc(r.content)}">${esc(r.content)}</div>`:'<span class="muted">—</span>'}</td>
         <td>${r.priority?`<span class="pill ${prioClass(r.priority)}">${esc(r.priority)}</span>`:""}</td>
         <td>${ticket}</td>
@@ -834,7 +846,7 @@ function wire(){
   $("tbody").addEventListener("click", onApproveClick);
   $("gmCancel").onclick=closeGrantModal;
   $("gmConfirm").onclick=confirmGrant;
-  $("gmFeature").onchange=()=>{ $("gmTicketHint").textContent = $("gmFeature").value==="reports.keystrokes" ? "Required for keystroke access." : "Optional."; };
+  $("gmFeature").addEventListener("change", updateTicketHint);
   $("grantModal").addEventListener("click",(e)=>{ if(e.target===$("grantModal")) closeGrantModal(); });
   document.addEventListener("keydown",(e)=>{ if(e.key==="Escape" && $("grantModal").classList.contains("open")) closeGrantModal(); });
   $("reloadBtn").onclick=loadData;
@@ -874,18 +886,24 @@ async function onEdit(e){
 
 /* ---- Approve & grant (human approval -> GrantQueue row -> Power Automate creates the Teramind policy) ---- */
 let grantTarget=null;
-function featureForType(t){ t=(t||"").toLowerCase(); if(t.indexOf("key")>=0) return FEATURE_BY_TYPE.key; if(t.indexOf("video")>=0) return FEATURE_BY_TYPE.video; return FEATURE_BY_TYPE.snap; }
+function selectedFeatures(){ return [...document.querySelectorAll('#gmFeature input:checked')].map(i=>i.value); }
+function setFeatures(list){ document.querySelectorAll('#gmFeature input').forEach(i=>{ i.checked = list.indexOf(i.value)>=0; }); }
+function updateTicketHint(){ $("gmTicketHint").textContent = selectedFeatures().indexOf("reports.keystrokes")>=0 ? "Required for keystroke access." : "Optional."; }
 function openGrantModal(rec){
   grantTarget=rec;
   $("gmRequester").value=rec.requester||"";
-  $("gmEmail").value=(rec.email||"").trim() || ((/@/.test(rec.requester||""))?rec.requester.trim():"");
-  $("gmFeature").value=rec.feature||featureForType(rec.type);
+  // The form has no email question, so suggest first.last@go.team from the name; the approver verifies it.
+  let guess="";
+  if(/@/.test(rec.requester||"")) guess=rec.requester.trim();
+  else { const parts=(rec.requester||"").toLowerCase().replace(/[^a-z\s-]/g,"").trim().split(/\s+/).filter(Boolean); if(parts.length>=2) guess=parts[0]+"."+parts[parts.length-1]+"@go.team"; }
+  $("gmEmail").value=(rec.email||"").trim() || guess;
+  setFeatures(rec.feature ? rec.feature.split(/[;,]/).map(x=>x.trim()).filter(Boolean) : featuresForType(rec.type));
   const ovr=(rec.accessDays==null||String(rec.accessDays).trim()==="")?CONFIG.accessDays:Number(rec.accessDays);
   $("gmDays").value=(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays;
   $("gmSubjects").value=rec.subjects||"";
   $("gmTicket").value=rec.ticketId||"";
   $("gmApprover").value=(account&&(account.name||account.username))||"";
-  $("gmTicketHint").textContent = $("gmFeature").value==="reports.keystrokes" ? "Required for keystroke access." : "Optional.";
+  updateTicketHint();
   $("gmErr").style.display="none"; $("gmErr").textContent="";
   $("gmConfirm").disabled=false; $("gmConfirm").textContent="Approve & queue grant";
   $("grantModal").classList.add("open");
@@ -896,14 +914,15 @@ function gmError(msg){ const el=$("gmErr"); el.textContent=msg; el.style.display
 async function confirmGrant(){
   const rec=grantTarget; if(!rec) return;
   const email=$("gmEmail").value.trim().toLowerCase();
-  const feature=$("gmFeature").value;
+  const features=selectedFeatures(); const feature=features.join("; ");
   const days=parseInt($("gmDays").value,10);
   const subjects=$("gmSubjects").value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
   const ticket=$("gmTicket").value.trim();
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return gmError("Enter the requester's email address as it appears in Teramind.");
   if(isNaN(days)||days<1||days>365) return gmError("Access window must be between 1 and 365 days.");
   if(!subjects.length) return gmError("Enter at least one department name or team-member email the requester may view.");
-  if(feature==="reports.keystrokes" && !ticket) return gmError("A ticket number is required for keystroke access.");
+  if(!features.length) return gmError("Tick at least one kind of access to grant.");
+  if(features.indexOf("reports.keystrokes")>=0 && !ticket) return gmError("A ticket number is required for keystroke access.");
   const who=(account&&(account.name||account.username))||"";
   const isOwner = !(CONFIG.owners&&CONFIG.owners.length) || CONFIG.owners.some(o=>o.trim().toLowerCase()===who.trim().toLowerCase());
   if(!isOwner) return gmError("Only the IT owners listed in the dashboard configuration can approve requests (signed in as "+who+").");
@@ -1021,7 +1040,7 @@ function exportCsv(){
   const lines=[cols.map(c=>c[1]).join(",")].concat(filtered().map(r=>{
     const ai=accessInfo(r);
     const ovr=(r.accessDays==null||String(r.accessDays).trim()==="")?NaN:Number(r.accessDays);
-    const x=Object.assign({},r,{accessWindow:(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays, accessState:ai.text});
+    const x=Object.assign({},r,{type:cleanType(r.type), accessWindow:(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays, accessState:ai.text});
     return cols.map(c=>'"'+String(x[c[0]]==null?"":x[c[0]]).replace(/"/g,'""')+'"').join(",");
   }));
   const blob=new Blob([lines.join("\n")],{type:"text/csv"});
