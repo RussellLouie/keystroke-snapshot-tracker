@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center -->
+<!-- GoTeam Access Request Center · link-policy build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -139,6 +139,8 @@
   .policy-cell{ min-width:230px; max-width:300px; }
   .policy-name{ display:inline-block; font-size:12px; font-family:ui-monospace,Consolas,monospace; color:#374151; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:6px; padding:4px 8px; margin-top:4px; white-space:normal; word-break:break-word; line-height:1.4; cursor:copy; }
   .policy-name:hover{ background:#e8ecf3; }
+  .btn-link-policy{ font-size:11px; padding:4px 8px; border:1px dashed #94a3b8; background:#fff; color:#475569; border-radius:6px; cursor:pointer; }
+  .btn-link-policy:hover{ background:#f1f5f9; border-color:#64748b; }
   .policy-name.copied{ background:#dcfce7; border-color:#86efac; color:#15803d; }
   .req-scope{ margin-top:6px; font-size:11.5px; color:#516079; line-height:1.4; }
   .hold-lbl{ display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:#92600e; white-space:nowrap; cursor:pointer; }
@@ -958,7 +960,9 @@ function render(){
       const policyTag = "";
       const policyCell = r.policyId
         ? `<div class="policy-id">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>`
-        : (stLow==="approved" ? '<span class="muted">Granting…</span>' : '<span class="muted">—</span>');
+        : (stLow==="approved" ? '<span class="muted">Granting…</span>'
+          : stLow==="done" ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
+          : '<span class="muted">—</span>');
       const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}> Hold</label>` : "";
       const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
@@ -1016,6 +1020,7 @@ function wire(){
   $("tbody").addEventListener("blur", onEdit, true);
   $("tbody").addEventListener("click", onRevoke);
   $("tbody").addEventListener("click", onApproveClick);
+  $("tbody").addEventListener("click", onLinkPolicy);
   $("tbody").addEventListener("click", (e)=>{
     const el=e.target.closest('[data-act="copy-policy"]'); if(!el) return;
     const txt=el.textContent; (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{
@@ -1034,7 +1039,7 @@ function wire(){
   $("emailLinkBtn").onclick=emailSheetLink;
 }
 async function onEdit(e){
-  const act=e.target.getAttribute("data-act"); if(!act || act==="revoke" || act==="approve") return;
+  const act=e.target.getAttribute("data-act"); if(!act || act==="revoke" || act==="approve" || act==="link-policy" || act==="copy-policy") return;
   const tr=e.target.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const sel=tr.querySelector('[data-act="status"]'), inp=tr.querySelector('[data-act="notes"]'), own=tr.querySelector('[data-act="owner"]');
@@ -1233,6 +1238,35 @@ async function onRevoke(e){
   }catch(err){
     btn.textContent="Revoke"; btn.disabled=false;
     showBanner("Couldn't revoke: "+err.message,"err");
+  }
+}
+
+// Attach a hand-made Teramind policy to a Done request so the worker revokes it when the window ends.
+async function onLinkPolicy(e){
+  const btn=e.target.closest('[data-act="link-policy"]'); if(!btn) return;
+  const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
+  const rec=rows.find(x=>x.id===id); if(!rec) return;
+  const me=currentItStaff();
+  if(!me) return showBanner("Only IT staff listed in the dashboard configuration can link a policy.","err");
+  const raw=prompt("Teramind Access Control policy ID for "+(rec.requester||id)+"\n\nFind it in Teramind → Manage → Access Control (the number in the policy's URL or list). Once linked, the automation deletes this policy when the access window ends, or when Revoke is clicked.");
+  if(raw==null) return;
+  const pid=String(raw).trim().replace(/^#/,"");
+  if(!/^\d+$/.test(pid)) return showBanner("Policy ID must be a number.","err");
+  const ai=accessInfo(rec);
+  if(!confirm("Link policy #"+pid+" to this request?\n\nIt will be deleted automatically: "+ai.text+".")) return;
+  btn.textContent="Linking…"; btn.disabled=true;
+  try{
+    rec.policyId=pid;
+    if(!rec.feature) rec.feature=featuresForType(rec.type).join("; ");
+    const stamp="Linked existing policy #"+pid+" by "+me.name+" "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
+    rec.notes = rec.notes ? (stamp+" | "+rec.notes) : stamp;
+    await withRetry(()=>saveTracking(rec));
+    const t=tracking[id]; if(t){ rec.updatedBy=t.updatedBy; rec.updatedAt=t.updatedAt; }
+    render();
+    showBanner("Policy #"+pid+" linked — the automation will remove it when the window ends.","info");
+  }catch(err){
+    btn.textContent="Link policy…"; btn.disabled=false;
+    showBanner("Couldn't link the policy: "+err.message,"err");
   }
 }
 
