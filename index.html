@@ -371,10 +371,31 @@ const CONFIG = {
   // Access window in days — after this many days from submission, a row is flagged for deletion:
   accessDays: 7,
   // IT staff who can be assigned as the owner of a request (edit this list to add/remove people):
-  owners: ["Clint Gallentes","Olem Babia","Paul Vallecera","Rudy Maneja","Russell Louie Bual"],
+  // Every IT member listed here can be assigned as owner AND can approve/queue grants.
+  // Matching is by the signed-in email (case-insensitive); the name is what is recorded as the approver.
+  itStaff: [
+    { name:"Russell Louie Bual", email:"russell.bual@go.team" },
+    { name:"Jhazer Andrade",     email:"jhazer.andrade@go.team" },
+    { name:"Clint Gallentes",    email:"clint.gallentes@go.team" },
+    { name:"Reylance Lacerna",   email:"reylance.lancerna@go.team" },
+    { name:"Christian Esaga",    email:"christian.esaga@go.team" },
+    { name:"Rudy Maneja",        email:"rudy.maneja@go.team" },
+    { name:"Diether Gingoyon",   email:"diether.gingoyon@go.team" },
+    { name:"Jhayson Navaja",     email:"jhayson.navaja@go.team" },
+    { name:"Olem Babia",         email:"olem.babia@go.team" }
+  ],
+  get owners(){ return this.itStaff.map(s=>s.name); },
   // Public Microsoft Form people fill out to submit a request (shared by the Copy/Email buttons):
   formUrl: "https://forms.office.com/Pages/ResponsePage.aspx?id=eaHfI7KW9kCr1H_qMX8K9h532BI61vJPiBflncnicytUNlpQOVo0NUw4TVFRTUQxVjkxR0ZLSDg3SyQlQCN0PWcu"
 };
+// Resolve the signed-in account to an entry in CONFIG.itStaff (by email first, then by name). null = not IT.
+function currentItStaff(){
+  if(!account) return null;
+  const mail=((account.username||"")+"").trim().toLowerCase();
+  const name=((account.name||"")+"").trim().toLowerCase();
+  const list=CONFIG.itStaff||[];
+  return list.find(s=>s.email.toLowerCase()===mail) || list.find(s=>s.name.toLowerCase()===name) || null;
+}
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["User.Read", "Files.ReadWrite.All"];
 
@@ -1042,7 +1063,7 @@ function openGrantModal(rec){
     ? 'Pick from Teramind\'s people and departments. Entries marked <span class="chip-miss-demo">not in Teramind</span> must be fixed or removed before approving.'
     : 'Teramind directory not available yet (the automation publishes it). Entries are sent as typed and checked by the automation.';
   $("gmTicket").value=rec.ticketId||"";
-  $("gmApprover").value=(account&&(account.name||account.username))||"";
+  { const me=currentItStaff(); $("gmApprover").value=me?me.name:((account&&(account.name||account.username))||""); }
   updateTicketHint();
   $("gmErr").style.display="none"; $("gmErr").textContent="";
   $("gmConfirm").disabled=false; $("gmConfirm").textContent="Approve & queue grant";
@@ -1130,9 +1151,9 @@ async function confirmGrant(){
   if(!subjects.length) return gmError("Enter at least one department name or team-member email the requester may view.");
   if(!features.length) return gmError("Tick at least one kind of access to grant.");
   if(features.indexOf("reports.keystrokes")>=0 && !ticket) return gmError("A ticket number is required for keystroke access.");
-  const who=(account&&(account.name||account.username))||"";
-  const isOwner = !(CONFIG.owners&&CONFIG.owners.length) || CONFIG.owners.some(o=>o.trim().toLowerCase()===who.trim().toLowerCase());
-  if(!isOwner) return gmError("Only the IT owners listed in the dashboard configuration can approve requests (signed in as "+who+").");
+  const me=currentItStaff();
+  if(!me) return gmError("Only IT staff listed in the dashboard configuration can approve requests (signed in as "+((account&&(account.username||account.name))||"unknown")+"). Ask Russell to add you to the list.");
+  const who=me.name;
   const when=new Date().toISOString();
   $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
   try{
