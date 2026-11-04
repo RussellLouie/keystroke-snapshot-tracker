@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · safe-save build -->
+<!-- GoTeam Access Request Center · approver-roles build 1 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -379,23 +379,25 @@ const CONFIG = {
   // Access window in days — after this many days from submission, a row is flagged for deletion:
   accessDays: 7,
   // IT staff who can be assigned as the owner of a request (edit this list to add/remove people):
-  // Every IT member listed here can be assigned as owner AND can approve/queue grants.
+  // Every IT member listed here can sign in and view. Only those with approve:true can change anything:
+  // approve & grant, revoke, link a policy, and edit owner/status/notes/days/hold. Everyone else is read-only.
   // Matching is by the signed-in email (case-insensitive); the name is what is recorded as the approver.
   itStaff: [
-    { name:"Russell Louie Bual", email:"russell.bual@go.team" },
+    { name:"Russell Louie Bual", email:"russell.bual@go.team",  approve:true },
+    { name:"Clint Gallentes",    email:"clint.gallentes@go.team", approve:true },
+    { name:"Olem Babia",         email:"olem.babia@go.team",     approve:true },
+    { name:"Paul John Vallecera", email:"paul.vallecera@go.team", approve:true },
     { name:"Jhazer Andrade",     email:"jhazer.andrade@go.team" },
-    { name:"Clint Gallentes",    email:"clint.gallentes@go.team" },
     { name:"Reylance Lacerna",   email:"reylance.lancerna@go.team" },
     { name:"Christian Esaga",    email:"christian.esaga@go.team" },
     { name:"Rudy Maneja",        email:"rudy.maneja@go.team" },
     { name:"Diether Gingoyon",   email:"diether.gingoyon@go.team" },
     { name:"Jhayson Navaja",     email:"jhayson.navaja@go.team" },
-    { name:"Olem Babia",         email:"olem.babia@go.team" },
     { name:"Bon Go",             email:"bon.go@go.team" },
-    { name:"Sean Yap",           email:"sean.yap@go.team" },
-    { name:"Paul John Vallecera", email:"paul.vallecera@go.team" }
+    { name:"Sean Yap",           email:"sean.yap@go.team" }
   ],
-  get owners(){ return this.itStaff.map(s=>s.name); },
+  // Owner dropdown = the approvers only (an owner is the person accountable for granting/revoking).
+  get owners(){ return this.itStaff.filter(s=>s.approve).map(s=>s.name); },
   // Public Microsoft Form people fill out to submit a request (shared by the Copy/Email buttons):
   formUrl: "https://forms.office.com/Pages/ResponsePage.aspx?id=eaHfI7KW9kCr1H_qMX8K9h532BI61vJPiBflncnicytUNlpQOVo0NUw4TVFRTUQxVjkxR0ZLSDg3SyQlQCN0PWcu"
 };
@@ -407,6 +409,8 @@ function currentItStaff(){
   const list=CONFIG.itStaff||[];
   return list.find(s=>s.email.toLowerCase()===mail) || list.find(s=>s.name.toLowerCase()===name) || null;
 }
+// true only for the approvers (CONFIG.itStaff[].approve). Everyone else sees the dashboard read-only.
+function canEdit(){ const me=currentItStaff(); return !!(me && me.approve); }
 const GRAPH = "https://graph.microsoft.com/v1.0";
 const SCOPES = ["User.Read", "Files.ReadWrite.All"];
 
@@ -735,6 +739,7 @@ function rowToRec(v){ const o={}; TRACK_FIELDS.forEach((k,i)=>{ o[k]=(v&&v[i]!=n
 // user actually touched (`fields`), keep everything the automation owns (PolicyId, DoneAt, ...), and never let a
 // stale page push a Done/Revoked request back to Approved. Duplicate rows for one request are all updated.
 async function saveTrackingInner(rec, fields){
+  if(!canEdit()) throw new Error("View only: your account is not an approver on this dashboard.");
   await ensureTrackingOnce();   // schema check once per session, before the first write
   const id=rec.id;
   const who = (account && (account.name||account.username)) || "";
@@ -981,21 +986,22 @@ function render(){
         : (ai.cls==="exp-await" ? ' title="The countdown starts once this request is marked Done." ' : "");
       const isRev=(r.status||"").toLowerCase()==="revoked";
       const daysVal=(r.accessDays==null||String(r.accessDays).trim()==="")?"":String(r.accessDays);
-      const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
+      const ro = !canEdit();
+      const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${(isRev||ro)?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
       const stLow=(r.status||"").toLowerCase();
       const policyTag = "";
       const policyCell = r.policyId
         ? `<div class="policy-id">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>`
         : (stLow==="approved" ? '<span class="muted">Granting…</span>'
-          : stLow==="done" ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
+          : (stLow==="done" && canEdit()) ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
           : '<span class="muted">—</span>');
-      const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}> Hold</label>` : "";
+      const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}${ro?" disabled":""}> Hold</label>` : "";
       const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=stLow==="revoked";
       const canApprove = (stLow==="pending"||stLow==="in progress");
       const approveBtn = canApprove ? `<button class="btn-approve" data-act="approve" title="Approve this request and queue the Teramind grant"${r.owner?"":" disabled"}>Approve &amp; grant</button>${r.owner?"":'<span class="muted" style="font-size:11px">Assign an owner first</span>'}` : "";
-      const actionCell = isRevoked
+      const actionCell = ro ? '<span class="muted" title="Only approvers can grant or revoke">View only</span>' : isRevoked
         ? '<span class="muted">Revoked</span>'
         : `<div class="act-cell">${approveBtn}<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button></div>`;
       return `<tr data-id="${esc(r.id)}">
@@ -1008,10 +1014,10 @@ function render(){
         <td class="content">${r.reqNotes?`<div class="clamp" title="${esc(r.reqNotes)}">${esc(r.reqNotes)}</div>`:'<span class="muted">—</span>'}</td>
         <td>${accessCell}</td>
         <td class="policy-cell">${policyCell}</td>
-        <td><select class="owner-sel" data-act="owner">${ownerOpts}</select></td>
-        <td><select class="status-sel ${statusClass(r.status)}" data-act="status">${opts}</select></td>
+        <td><select class="owner-sel" data-act="owner"${ro?" disabled":""}>${ownerOpts}</select></td>
+        <td><select class="status-sel ${statusClass(r.status)}" data-act="status"${ro?" disabled":""}>${opts}</select></td>
         <td class="lastup">${lastUp}</td>
-        <td><input class="notes-in" data-act="notes" value="${esc(r.notes)}" placeholder="Add note…"> <span class="saving" data-role="save"></span></td>
+        <td><input class="notes-in" data-act="notes" value="${esc(r.notes)}" placeholder="${ro?"":"Add note…"}"${ro?" readonly":""}> <span class="saving" data-role="save"></span></td>
         <td>${actionCell}</td>
       </tr>`;
     }).join("");
@@ -1208,7 +1214,7 @@ async function confirmGrant(){
   if(!features.length) return gmError("Tick at least one kind of access to grant.");
   if(features.indexOf("reports.keystrokes")>=0 && !ticket) return gmError("A ticket number is required for keystroke access.");
   const me=currentItStaff();
-  if(!me) return gmError("Only IT staff listed in the dashboard configuration can approve requests (signed in as "+((account&&(account.username||account.name))||"unknown")+"). Ask Russell to add you to the list.");
+  if(!me || !me.approve) return gmError("Only approvers (Russell, Clint, Olem, Paul John) can grant access (signed in as "+((account&&(account.username||account.name))||"unknown")+").");
   const who=me.name;
   const when=new Date().toISOString();
   $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
@@ -1269,7 +1275,7 @@ async function onLinkPolicy(e){
   const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const me=currentItStaff();
-  if(!me) return showBanner("Only IT staff listed in the dashboard configuration can link a policy.","err");
+  if(!me || !me.approve) return showBanner("Only approvers can link a policy.","err");
   const raw=prompt("Teramind Access Control policy ID for "+(rec.requester||id)+"\n\nFind it in Teramind → Manage → Access Control (the number in the policy's URL or list). Once linked, the automation deletes this policy when the access window ends, or when Revoke is clicked.");
   if(raw==null) return;
   const pid=String(raw).trim().replace(/^#/,"");
@@ -1393,6 +1399,7 @@ async function loadData(){
   render();
   $("loading").style.display="none"; $("tbl").style.display="table";
   if(!trackOk) showBanner("Requests are shown without their statuses because the workbook is open for editing elsewhere — click Reload in a moment.","info");
+  else if(!canEdit()) showBanner("View only — your account can see requests but not grant, revoke or edit them. Approvers: Russell, Clint, Olem and Paul John.","info");
   pDir.then(()=>{ buildRows(lastValues); render(); });   // ✓/✗ indicators + picker once the directory lands
 }
 // readTracking() swallows errors; this variant throws so loadData can tell "missing table" from "empty".
