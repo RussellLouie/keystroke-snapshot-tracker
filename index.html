@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · approver-roles build 1 -->
+<!-- GoTeam Access Request Center · approver-roles build 3 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -987,21 +987,21 @@ function render(){
       const isRev=(r.status||"").toLowerCase()==="revoked";
       const daysVal=(r.accessDays==null||String(r.accessDays).trim()==="")?"":String(r.accessDays);
       const ro = !canEdit();
-      const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${(isRev||ro)?" disabled":""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
+      const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""}${ro?' data-ro="1" readonly':""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
       const stLow=(r.status||"").toLowerCase();
       const policyTag = "";
       const policyCell = r.policyId
         ? `<div class="policy-id">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>`
         : (stLow==="approved" ? '<span class="muted">Granting…</span>'
-          : (stLow==="done" && canEdit()) ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
+          : stLow==="done" ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
           : '<span class="muted">—</span>');
-      const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}${ro?" disabled":""}> Hold</label>` : "";
+      const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}${ro?' data-ro="1"':""}> Hold</label>` : "";
       const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=stLow==="revoked";
       const canApprove = (stLow==="pending"||stLow==="in progress");
       const approveBtn = canApprove ? `<button class="btn-approve" data-act="approve" title="Approve this request and queue the Teramind grant"${r.owner?"":" disabled"}>Approve &amp; grant</button>${r.owner?"":'<span class="muted" style="font-size:11px">Assign an owner first</span>'}` : "";
-      const actionCell = ro ? '<span class="muted" title="Only approvers can grant or revoke">View only</span>' : isRevoked
+      const actionCell = isRevoked
         ? '<span class="muted">Revoked</span>'
         : `<div class="act-cell">${approveBtn}<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button></div>`;
       return `<tr data-id="${esc(r.id)}">
@@ -1014,10 +1014,10 @@ function render(){
         <td class="content">${r.reqNotes?`<div class="clamp" title="${esc(r.reqNotes)}">${esc(r.reqNotes)}</div>`:'<span class="muted">—</span>'}</td>
         <td>${accessCell}</td>
         <td class="policy-cell">${policyCell}</td>
-        <td><select class="owner-sel" data-act="owner"${ro?" disabled":""}>${ownerOpts}</select></td>
-        <td><select class="status-sel ${statusClass(r.status)}" data-act="status"${ro?" disabled":""}>${opts}</select></td>
+        <td><select class="owner-sel" data-act="owner"${ro?' data-ro="1"':""}>${ownerOpts}</select></td>
+        <td><select class="status-sel ${statusClass(r.status)}" data-act="status"${ro?' data-ro="1"':""}>${opts}</select></td>
         <td class="lastup">${lastUp}</td>
-        <td><input class="notes-in" data-act="notes" value="${esc(r.notes)}" placeholder="${ro?"":"Add note…"}"${ro?" readonly":""}> <span class="saving" data-role="save"></span></td>
+        <td><input class="notes-in" data-act="notes" value="${esc(r.notes)}" placeholder="Add note…"${ro?' data-ro="1" readonly':""}> <span class="saving" data-role="save"></span></td>
         <td>${actionCell}</td>
       </tr>`;
     }).join("");
@@ -1052,7 +1052,10 @@ function wire(){
   $("tbody").addEventListener("blur", onEdit, true);
   $("tbody").addEventListener("click", onRevoke);
   $("tbody").addEventListener("click", onApproveClick);
-  $("tbody").addEventListener("click", onLinkPolicy);   // hand-made policy → auto-revoke
+  $("tbody").addEventListener("click", onLinkPolicy);
+  // Read-only users: any attempt to use a row control gets the "not permitted" prompt and the control is reset.
+  $("tbody").addEventListener("mousedown", (e)=>{ const el=e.target.closest('[data-ro="1"]'); if(!el) return; e.preventDefault(); el.blur(); notApproverPrompt("edit requests"); }, true);
+  $("tbody").addEventListener("keydown", (e)=>{ const el=e.target.closest('[data-ro="1"]'); if(!el) return; if(e.key==="Tab") return; e.preventDefault(); notApproverPrompt("edit requests"); }, true);   // hand-made policy → auto-revoke
   $("tbody").addEventListener("click", (e)=>{
     const el=e.target.closest('[data-act="copy-policy"]'); if(!el) return;
     const txt=el.textContent; (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>{
@@ -1072,6 +1075,7 @@ function wire(){
 }
 async function onEdit(e){
   const act=e.target.getAttribute("data-act"); if(!act || act==="revoke" || act==="approve" || act==="link-policy" || act==="copy-policy") return;
+  if(e.target.getAttribute("data-ro")==="1"){ render(); return notApproverPrompt("edit requests"); }
   const tr=e.target.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   // Only the control that fired is saved; everything else is taken fresh from the sheet at save time.
@@ -1231,8 +1235,14 @@ async function confirmGrant(){
     gmError("Couldn't queue the grant: "+((err&&err.message)||err));
   }
 }
+const APPROVERS_TEXT = () => (CONFIG.itStaff||[]).filter(s=>s.approve).map(s=>s.name).join(", ");
+function notApproverPrompt(what){
+  const who=(account&&(account.name||account.username))||"your account";
+  alert("Not permitted\n\n"+who+" can view requests but cannot "+what+".\n\nOnly the designated approvers can do this: "+APPROVERS_TEXT()+".\nPlease ask one of them to action this request.");
+}
 function onApproveClick(e){
   const btn=e.target.closest('[data-act="approve"]'); if(!btn) return;
+  if(!canEdit()) return notApproverPrompt("grant Teramind access");
   const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   openGrantModal(rec);
@@ -1254,6 +1264,7 @@ async function deleteRequest(id){
 }
 async function onRevoke(e){
   const btn=e.target.closest('[data-act="revoke"]'); if(!btn) return;
+  if(!canEdit()) return notApproverPrompt("revoke Teramind access");
   const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const label=rec.requester||rec.content||("request "+id);
@@ -1275,7 +1286,7 @@ async function onLinkPolicy(e){
   const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const me=currentItStaff();
-  if(!me || !me.approve) return showBanner("Only approvers can link a policy.","err");
+  if(!me || !me.approve) return notApproverPrompt("link a Teramind policy");
   const raw=prompt("Teramind Access Control policy ID for "+(rec.requester||id)+"\n\nFind it in Teramind → Manage → Access Control (the number in the policy's URL or list). Once linked, the automation deletes this policy when the access window ends, or when Revoke is clicked.");
   if(raw==null) return;
   const pid=String(raw).trim().replace(/^#/,"");
