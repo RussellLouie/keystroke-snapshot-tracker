@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · edit-grant build 2 -->
+<!-- GoTeam Access Request Center · feature-rules build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -331,8 +331,9 @@
             <div id="gmFeature" class="feat-list">
               <label class="feat"><input type="checkbox" value="reports.snapshots"> Snapshots <span class="hint">View Snapshots report</span></label>
               <label class="feat"><input type="checkbox" value="reports.keystrokes"> Keystrokes <span class="hint">View Keystrokes report</span></label>
-              <label class="feat"><input type="checkbox" value="player.history"> Video playback <span class="hint">Play historic screen stream</span></label>
-            </div></div>
+              <label class="feat"><input type="checkbox" value="player.history"> Video playback <span class="hint">Play historic screen stream · requires Snapshots</span></label>
+            </div>
+            <div class="muted" id="gmFeatNote" style="font-size:11px;margin-top:4px;display:none">Snapshots is included automatically — Teramind needs it for Video playback to work.</div></div>
           <div><label>Access window (days)</label><input type="number" id="gmDays" min="1" max="365" step="1"></div>
         </div>
         <div><label>Who they may view</label>
@@ -1073,7 +1074,7 @@ function wire(){
   });
   $("gmCancel").onclick=closeGrantModal;
   $("gmConfirm").onclick=confirmGrant;
-  $("gmFeature").addEventListener("change", updateTicketHint);
+  $("gmFeature").addEventListener("change", ()=>{ enforceFeatureRules(); updateTicketHint(); });
   wirePicker();
   $("gmEmail").addEventListener("input", checkEmailField);
   $("grantModal").addEventListener("click",(e)=>{ if(e.target===$("grantModal")) closeGrantModal(); });
@@ -1115,8 +1116,21 @@ async function onEdit(e){
 
 /* ---- Approve & grant (human approval -> GrantQueue row -> Power Automate creates the Teramind policy) ---- */
 let grantTarget=null;
-function selectedFeatures(){ return [...document.querySelectorAll('#gmFeature input:checked')].map(i=>i.value); }
-function setFeatures(list){ document.querySelectorAll('#gmFeature input').forEach(i=>{ i.checked = list.indexOf(i.value)>=0; }); }
+function selectedFeatures(){
+  const f=[...document.querySelectorAll('#gmFeature input:checked')].map(i=>i.value);
+  if(f.indexOf("player.history")>=0 && f.indexOf("reports.snapshots")<0) f.unshift("reports.snapshots");   // Teramind dependency
+  return f;
+}
+function setFeatures(list){ document.querySelectorAll('#gmFeature input').forEach(i=>{ i.checked = list.indexOf(i.value)>=0; }); enforceFeatureRules(); }
+// Teramind rule: Video playback only works together with Snapshots. Snapshots alone is fine.
+function enforceFeatureRules(){
+  const snap=document.querySelector('#gmFeature input[value="reports.snapshots"]');
+  const video=document.querySelector('#gmFeature input[value="player.history"]');
+  if(!snap||!video) return;
+  if(video.checked){ snap.checked=true; snap.disabled=true; snap.closest(".feat").title="Required while Video playback is selected"; }
+  else { snap.disabled=false; snap.closest(".feat").title=""; }
+  const n=$("gmFeatNote"); if(n) n.style.display = video.checked ? "block" : "none";
+}
 function updateTicketHint(){ $("gmTicketHint").textContent = selectedFeatures().indexOf("reports.keystrokes")>=0 ? "Required for keystroke access." : "Optional."; }
 let grantEdit=false;   // true when the modal is changing an existing grant (policy updated in place)
 function openGrantModal(rec, edit){
