@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · approver-roles build 3 -->
+<!-- GoTeam Access Request Center · edit-grant build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -199,6 +199,8 @@
   .btn-del:hover{ background:#fef2f2; } .btn-del:disabled{ opacity:.55; cursor:default; }
   select.owner-sel{ padding:6px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; color:#33405a; max-width:150px; }
   .btn-revoke{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .btn-edit{ background:#fff; color:#1f4fb8; border:1px solid #c7d7fb; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }
+  .btn-edit:hover{ background:#eef3fe; }
   .btn-revoke:hover{ background:#fef2f2; } .btn-revoke:disabled{ opacity:.55; cursor:default; }
   .lastup{ font-size:12.5px; color:#33405a; white-space:nowrap; } .lastup-date{ font-size:11px; margin-top:2px; }
   .empty{ text-align:center; color:var(--muted2); padding:48px 20px; }
@@ -319,7 +321,7 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="gmTitle">
       <h2 id="gmTitle">Approve &amp; grant Teramind access</h2>
       <div class="m-body">
-        <div class="m-warn">Approving queues the grant. The automation creates a scoped Access Control policy in Teramind within a few minutes, records the policy ID here, sets the request to <strong>Done</strong>, and emails the requester. Access is removed automatically when the window ends.</div>
+        <div class="m-warn" id="gmIntro">Approving queues the grant. The automation creates a scoped Access Control policy in Teramind within a few minutes, records the policy ID here, sets the request to <strong>Done</strong>, and emails the requester. Access is removed automatically when the window ends.</div>
         <div class="m-row">
           <div><label>Requester</label><input type="text" id="gmRequester" readonly></div>
           <div><label>Requester email (Teramind login)</label><input type="text" id="gmEmail" placeholder="name@go.team" autocomplete="off"><div class="hint" id="gmEmailHint">Must match the employee's email in Teramind.</div></div>
@@ -695,7 +697,7 @@ async function ensureGrantQueue(){
 async function queueGrant(q){
   await withRetry(()=>ensureGrantQueue());
   const id = (window.crypto&&crypto.randomUUID) ? crypto.randomUUID() : ("gq"+Date.now());
-  const vals=[[id, q.responseId, q.requesterName, q.requesterEmail, q.feature, q.subjects, q.accessDays, q.ticket, q.approvedBy, q.approvedAt, "Queued", "", "", ""]];
+  const vals=[[id, q.responseId, q.requesterName, q.requesterEmail, q.feature, q.subjects, q.accessDays, q.ticket, q.approvedBy, q.approvedAt, "Queued", q.policyId||"", "", ""]];
   await withRetry(()=>graph(itemBase()+"/workbook/tables/"+GRANT_TABLE+"/rows/add",{method:"POST",body:JSON.stringify({values:vals})}));
   return id;
 }
@@ -760,7 +762,8 @@ async function saveTrackingInner(rec, fields){
   if(subD){ out.submitted = subD.toISOString(); out.submitMinLocal = subD.getHours()*60 + subD.getMinutes(); }
   // 3) Guard rails against stale pages
   const curSt=String(base.status||"").toLowerCase(), newSt=String(out.status||"").toLowerCase();
-  if("status" in fields){
+  const isEdit=!!fields._edit; delete out._edit;
+  if("status" in fields && !isEdit){
     if((curSt==="done"||curSt==="revoked") && base.policyId && (newSt==="approved"||newSt==="pending"||newSt==="in progress")){
       // The automation already granted (or removed) this one; a plain status change must not undo that.
       out.status = base.status; out.policyId = base.policyId; out.doneAt = base.doneAt;
@@ -990,7 +993,9 @@ function render(){
       const daysIn=`<label class="days-lbl"><input type="number" class="days-in" data-act="days" min="1" max="365" step="1" value="${esc(daysVal)}" placeholder="${CONFIG.accessDays}"${isRev?" disabled":""}${ro?' data-ro="1" readonly':""} title="Access window for this request in days (blank = default ${CONFIG.accessDays}). The countdown starts when the request is marked Done."> days</label>`;
       const stLow=(r.status||"").toLowerCase();
       const policyTag = "";
-      const policyCell = r.policyId
+      const policyCell = (r.policyId && stLow==="approved")
+        ? `<div class="policy-id">policy #${esc(r.policyId)}</div><span class="muted">Updating…</span>`
+        : r.policyId
         ? `<div class="policy-id">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>`
         : (stLow==="approved" ? '<span class="muted">Granting…</span>'
           : stLow==="done" ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
@@ -1003,7 +1008,7 @@ function render(){
       const approveBtn = canApprove ? `<button class="btn-approve" data-act="approve" title="Approve this request and queue the Teramind grant"${r.owner?"":" disabled"}>Approve &amp; grant</button>${r.owner?"":'<span class="muted" style="font-size:11px">Assign an owner first</span>'}` : "";
       const actionCell = isRevoked
         ? '<span class="muted">Revoked</span>'
-        : `<div class="act-cell">${approveBtn}<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button></div>`;
+        : `<div class="act-cell">${approveBtn}${(stLow==="done"&&r.policyId)?`<button class="btn-edit" data-act="edit" title="Change who they may view, the access types or the window — the Teramind policy is updated in place">Edit</button>`:""}<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button></div>`;
       return `<tr data-id="${esc(r.id)}">
         <td>${esc(fmt(r.submitted))}</td>
         <td>${esc(r.requester)}</td>
@@ -1074,7 +1079,7 @@ function wire(){
   $("emailLinkBtn").onclick=emailSheetLink;
 }
 async function onEdit(e){
-  const act=e.target.getAttribute("data-act"); if(!act || act==="revoke" || act==="approve" || act==="link-policy" || act==="copy-policy") return;
+  const act=e.target.getAttribute("data-act"); if(!act || act==="revoke" || act==="approve" || act==="link-policy" || act==="copy-policy" || act==="edit") return;
   if(e.target.getAttribute("data-ro")==="1"){ render(); return notApproverPrompt("edit requests"); }
   const tr=e.target.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
@@ -1108,8 +1113,13 @@ let grantTarget=null;
 function selectedFeatures(){ return [...document.querySelectorAll('#gmFeature input:checked')].map(i=>i.value); }
 function setFeatures(list){ document.querySelectorAll('#gmFeature input').forEach(i=>{ i.checked = list.indexOf(i.value)>=0; }); }
 function updateTicketHint(){ $("gmTicketHint").textContent = selectedFeatures().indexOf("reports.keystrokes")>=0 ? "Required for keystroke access." : "Optional."; }
-function openGrantModal(rec){
-  grantTarget=rec;
+let grantEdit=false;   // true when the modal is changing an existing grant (policy updated in place)
+function openGrantModal(rec, edit){
+  grantTarget=rec; grantEdit=!!edit;
+  $("gmTitle").textContent = edit ? "Edit Teramind access (policy #"+rec.policyId+")" : "Approve & grant Teramind access";
+  $("gmIntro").innerHTML = edit
+    ? "Change what this person may view, which access they have, or the access window. The automation <strong>updates the existing policy in place</strong> within a few seconds (the policy number stays the same) and the window restarts from today."
+    : "Approving queues the grant. The automation creates a scoped Access Control policy in Teramind within a few minutes, records the policy ID here, sets the request to <strong>Done</strong>, and emails the requester. Access is removed automatically when the window ends.";
   $("gmRequester").value=rec.requester||"";
   // Prefer the sign-in email recorded by the form; fall back to a first.last@go.team guess from the name.
   let guess="";
@@ -1132,7 +1142,7 @@ function openGrantModal(rec){
   { const me=currentItStaff(); $("gmApprover").value=me?me.name:((account&&(account.name||account.username))||""); }
   updateTicketHint();
   $("gmErr").style.display="none"; $("gmErr").textContent="";
-  $("gmConfirm").disabled=false; $("gmConfirm").textContent="Approve & queue grant";
+  $("gmConfirm").disabled=false; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant";
   $("grantModal").classList.add("open");
   setTimeout(()=>$("gmSearch").focus(),50);
 }
@@ -1224,14 +1234,18 @@ async function confirmGrant(){
   $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
   try{
     if(!DRIVE_ID) await resolveWorkbook();
-    await queueGrant({ responseId:rec.id, requesterName:rec.requester||"", requesterEmail:email, feature, subjects:subjects.join("; "), accessDays:days, ticket, approvedBy:who, approvedAt:when });
-    const f={ status:"Approved", accessDays:days, subjects:subjects.join("; "), approvedBy:who, approvedAt:when, feature, policyId:"" , doneAt:"" };
+    const editPid = grantEdit ? String(rec.policyId||"") : "";
+    await queueGrant({ responseId:rec.id, requesterName:rec.requester||"", requesterEmail:email, feature, subjects:subjects.join("; "), accessDays:days, ticket, approvedBy:who, approvedAt:when, policyId:editPid });
+    const f={ status:"Approved", accessDays:days, subjects:subjects.join("; "), approvedBy:who, approvedAt:when, feature, policyId:editPid, doneAt:"", _edit:grantEdit };
     if(ticket && !rec.ticketId) f.notes=(rec.notes?rec.notes+" | ":"")+"Ticket "+ticket;
+    if(grantEdit) f.notes=("Grant edited by "+who+" "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})+(f.notes?" | "+f.notes:(rec.notes?" | "+rec.notes:"")));
     await withRetry(()=>saveTracking(rec, f));
     closeGrantModal(); render();
-    showBanner("Approved. The grant is queued — Teramind access for "+(rec.requester||email)+" will be created by the automation within a few minutes and the request will move to Done.","info");
+    showBanner(grantEdit
+      ? "Changes queued — policy #"+editPid+" will be updated by the automation within a few seconds; the row returns to Done when finished."
+      : "Approved. The grant is queued — Teramind access for "+(rec.requester||email)+" will be created by the automation within a few minutes and the request will move to Done.","info");
   }catch(err){
-    $("gmConfirm").disabled=false; $("gmConfirm").textContent="Approve & queue grant";
+    $("gmConfirm").disabled=false; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant";
     gmError("Couldn't queue the grant: "+((err&&err.message)||err));
   }
 }
@@ -1241,11 +1255,12 @@ function notApproverPrompt(what){
   alert("Not permitted\n\n"+who+" can view requests but cannot "+what+".\n\nOnly the designated approvers can do this: "+APPROVERS_TEXT()+".\nPlease ask one of them to action this request.");
 }
 function onApproveClick(e){
-  const btn=e.target.closest('[data-act="approve"]'); if(!btn) return;
-  if(!canEdit()) return notApproverPrompt("grant Teramind access");
+  const btn=e.target.closest('[data-act="approve"],[data-act="edit"]'); if(!btn) return;
+  const edit = btn.getAttribute("data-act")==="edit";
+  if(!canEdit()) return notApproverPrompt(edit ? "edit a Teramind grant" : "grant Teramind access");
   const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
-  openGrantModal(rec);
+  openGrantModal(rec, edit);
 }
 
 /* Locate the row in the responses table by its Forms ID, then delete it. */
