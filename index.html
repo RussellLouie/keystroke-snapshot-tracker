@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · dropdown-not-in-list build -->
+<!-- GoTeam Access Request Center · approve-gated build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -520,7 +520,12 @@ function resolveEntry(text){
   return { kind:"miss", label:t, value:t };
 }
 // Closest Teramind matches for a mistyped email or name (used by the "needs correction" box).
-function lev(a,b){ a=a.toLowerCase(); b=b.toLowerCase(); const m=a.length,n=b.length; if(!m) return n; if(!n) return m; let prev=[...Array(n+1).keys()]; for(let i=1;i<=m;i++){ const cur=[i]; for(let j=1;j<=n;j++){ cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1)); } prev=cur; } return prev[n]; }
+// Edit distance with adjacent swaps counted as one edit ("adnrade" → "andrade" = 1).
+function lev(a,b){ a=a.toLowerCase(); b=b.toLowerCase(); const m=a.length,n=b.length; if(!m) return n; if(!n) return m;
+  const d=[]; for(let i=0;i<=m;i++){ d[i]=[i]; } for(let j=0;j<=n;j++) d[0][j]=j;
+  for(let i=1;i<=m;i++){ for(let j=1;j<=n;j++){ const c=a[i-1]===b[j-1]?0:1; d[i][j]=Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+c);
+    if(i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1]) d[i][j]=Math.min(d[i][j], d[i-2][j-2]+1); } }
+  return d[m][n]; }
 function suggestFor(text, limit){
   if(!DIR.loaded) return [];
   const t=String(text||"").trim().toLowerCase(); if(!t) return [];
@@ -531,8 +536,9 @@ function suggestFor(text, limit){
     if(a.hidden||!a.email) continue;
     const al=a.email.split("@")[0].toLowerCase(); const an=normName(a.name);
     let sc=lev(local, al);
-    // token overlap bonus (e.g. "russel.bual" vs "russell.bual", "bual russell")
-    const hit=toks.filter(k=>k.length>=3 && (al.indexOf(k)>=0 || an.indexOf(k)>=0)).length;
+    // token overlap bonus (e.g. "russel.bual" vs "russell.bual", "bual russell"); near-miss tokens count too ("adnrade" ~ "andrade")
+    const atoks=al.split(/[._\-]+/).concat(an.split(" ")).filter(Boolean);
+    const hit=toks.filter(k=>k.length>=3 && (al.indexOf(k)>=0 || an.indexOf(k)>=0 || atoks.some(w=>w.length>=3 && lev(k,w)<=1))).length;
     sc -= hit*2;
     if(al.startsWith(local) || (toks[0] && toks[0].length>=3 && (an.startsWith(toks[0]) || an.split(" ").some(w=>w.startsWith(toks[0]))))) sc = Math.min(sc, 1);   // a prefix is always a candidate
     scored.push([sc,a]);
@@ -1249,7 +1255,7 @@ function openGrantModal(rec, edit){
   { const me=currentItStaff(); $("gmApprover").value=me?me.name:((account&&(account.name||account.username))||""); }
   updateTicketHint();
   $("gmErr").style.display="none"; $("gmErr").textContent="";
-  $("gmConfirm").disabled=false; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant";
+  $("gmConfirm").dataset.busy="0"; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant"; updateConfirmState();
   $("grantModal").classList.add("open");
   setTimeout(()=>$("gmSearch").focus(),50);
 }
@@ -1258,8 +1264,17 @@ function closeGrantModal(){ $("grantModal").classList.remove("open"); grantTarge
 /* ---- Subject picker (chips + suggestions from the Teramind directory) ---- */
 let CHIPS=[], SUG=[], sugIdx=-1;
 function chipsValue(){ return CHIPS.map(c=>c.value); }
+function chipsNeedFix(){ return CHIPS.some(c=>c.kind==="miss" || (c.kind==="newdept" && c.missing && c.missing.length)); }
+// Approve button is grayed out while any "Who they may view" entry is not in Teramind.
+function updateConfirmState(){
+  const b=$("gmConfirm"); if(!b || b.dataset.busy==="1") return;
+  const bad=chipsNeedFix();
+  b.disabled=bad;
+  b.title= bad ? "Fix or remove the entries marked \"not in Teramind\" first (see the red box)" : "";
+}
 function renderChips(){
   try{ renderFixBox(); }catch(e){}
+  try{ updateConfirmState(); }catch(e){}
   $("gmChips").innerHTML = CHIPS.map((c,i)=>{
     const cls = c.kind==="dept"?"c-dept" : c.kind==="agent"?"c-agent" : c.kind==="miss"?"c-miss" : c.kind==="newdept"?(c.missing&&c.missing.length?"c-miss":"c-new"):"";
     const sub = c.kind==="miss" ? "not in Teramind" : (c.sub||"");
@@ -1363,7 +1378,7 @@ async function confirmGrant(){
   if(!me || !me.approve) return gmError("Only approvers (Russell, Clint, Olem, Paul John) can grant access (signed in as "+((account&&(account.username||account.name))||"unknown")+").");
   const who=me.name;
   const when=new Date().toISOString();
-  $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
+  $("gmConfirm").dataset.busy="1"; $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
   try{
     if(!DRIVE_ID) await resolveWorkbook();
     const editPid = grantEdit ? String(rec.policyId||"") : "";
@@ -1378,7 +1393,7 @@ async function confirmGrant(){
       ? "Changes queued — policy #"+editPid+" will be updated by the automation within a few seconds; the row returns to Done when finished."
       : "Approved. The grant is queued — Teramind access for "+(rec.requester||email)+" will be created by the automation within a few minutes and the request will move to Done.","info");
   }catch(err){
-    $("gmConfirm").disabled=false; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant";
+    $("gmConfirm").dataset.busy="0"; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant"; updateConfirmState();
     gmError("Couldn't queue the grant: "+((err&&err.message)||err));
   }
 }
