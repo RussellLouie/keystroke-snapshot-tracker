@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · new-department build -->
+<!-- GoTeam Access Request Center · needs-correction build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -177,6 +177,15 @@
   .chip.c-dept{ background:#e8f0ff; color:#1e50b0; } .chip.c-agent{ background:#d9f7ee; color:#0f766e; }
   .chip.c-miss{ background:#fee2e2; color:#b42318; }
   .chip.c-new{ background:#fef3c7; color:#92400e; cursor:pointer; }
+  .fix-box{ margin-top:8px; border:1px solid #fca5a5; background:#fef2f2; border-radius:8px; padding:10px 12px; font-size:12px; color:#7f1d1d; }
+  .fix-box h4{ margin:0 0 6px 0; font-size:12px; color:#b42318; }
+  .fix-box .fx{ margin:6px 0; }
+  .fix-box .fx .typed{ font-family:ui-monospace,Consolas,monospace; background:#fee2e2; padding:1px 5px; border-radius:4px; }
+  .fix-box .sug{ display:inline-block; margin:3px 6px 0 0; padding:3px 8px; border:1px solid #c7d7fb; background:#fff; color:#1f4fb8; border-radius:999px; cursor:pointer; font-size:12px; }
+  .fix-box .sug:hover{ background:#eef3fe; }
+  .fix-box .rm{ display:inline-block; margin:3px 0 0 0; padding:3px 8px; border:1px solid #fecdca; background:#fff; color:#b42318; border-radius:999px; cursor:pointer; font-size:12px; }
+  .needs-fix{ display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px; background:#fee2e2; color:#b42318; font-size:11px; font-weight:600; vertical-align:middle; }
+  .btn-approve.warn{ background:#b42318; }
   .req-scope .newdept{ color:#92400e; font-weight:600; }
   .chip .sub{ font-weight:400; color:inherit; opacity:.75; font-size:11px; }
   .chip .x{ border:none; background:transparent; color:inherit; cursor:pointer; font-size:14px; line-height:1; padding:0 2px; opacity:.7; }
@@ -346,6 +355,7 @@
             <div class="sug" id="gmSug"></div>
           </div>
           <div class="hint" id="gmPickHint">Pick from Teramind's people and departments. Entries marked <span class="chip-miss-demo">not in Teramind</span> must be fixed or removed before approving.</div>
+          <div id="gmFix" class="fix-box" style="display:none"></div>
           <div class="hint" style="margin-top:6px"><button type="button" class="btn-ghost btn-xs" id="gmOwnDept">+ Requester's own department</button> <button type="button" class="btn-ghost btn-xs" id="gmNewDept" title="Client/department not in Teramind yet: it is created on approval and the listed team members are moved into it. Departments are never deleted automatically.">+ New department…</button></div>
           <textarea id="gmSubjects" style="display:none"></textarea></div>
         <div class="m-row">
@@ -501,6 +511,46 @@ function resolveEntry(text){
   const ppl=DIR.byName[n]||[]; if(ppl.length===1){ const a=ppl[0]; return { kind:"agent", label:a.name, sub:a.email, value:a.email, id:a.id, dept:a.dept }; }
   const partial=DIR.depts.filter(x=>normName(x.name).indexOf(n)>=0); if(partial.length===1){ const x=partial[0]; return { kind:"dept", label:x.name, sub:"department", value:x.name, id:x.id }; }
   return { kind:"miss", label:t, value:t };
+}
+// Closest Teramind matches for a mistyped email or name (used by the "needs correction" box).
+function lev(a,b){ a=a.toLowerCase(); b=b.toLowerCase(); const m=a.length,n=b.length; if(!m) return n; if(!n) return m; let prev=[...Array(n+1).keys()]; for(let i=1;i<=m;i++){ const cur=[i]; for(let j=1;j<=n;j++){ cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1)); } prev=cur; } return prev[n]; }
+function suggestFor(text, limit){
+  if(!DIR.loaded) return [];
+  const t=String(text||"").trim().toLowerCase(); if(!t) return [];
+  const local=t.indexOf("@")>=0 ? t.split("@")[0] : normName(t).replace(/\s+/g,".");
+  const toks=local.split(/[._\-\s]+/).filter(Boolean);
+  const scored=[];
+  for(const a of DIR.agents){
+    if(a.hidden||!a.email) continue;
+    const al=a.email.split("@")[0].toLowerCase(); const an=normName(a.name);
+    let sc=lev(local, al);
+    // token overlap bonus (e.g. "russel.bual" vs "russell.bual", "bual russell")
+    const hit=toks.filter(k=>k.length>=3 && (al.indexOf(k)>=0 || an.indexOf(k)>=0)).length;
+    sc -= hit*2;
+    if(al.startsWith(local) || (toks[0] && toks[0].length>=3 && (an.startsWith(toks[0]) || an.split(" ").some(w=>w.startsWith(toks[0]))))) sc = Math.min(sc, 1);   // a prefix is always a candidate
+    scored.push([sc,a]);
+  }
+  scored.sort((x,y)=>x[0]-y[0]);
+  return scored.slice(0, limit||3).filter(x=>x[0]<=Math.max(4, Math.floor(local.length/2))).map(x=>x[1]);
+}
+function renderFixBox(){
+  const box=$("gmFix"); if(!box) return;
+  const bad=CHIPS.map((c,i)=>({c,i})).filter(x=>x.c.kind==="miss" || (x.c.kind==="newdept" && x.c.missing && x.c.missing.length));
+  if(!bad.length){ box.style.display="none"; box.innerHTML=""; return; }
+  let html='<h4>⚠ Needs correction before this can be granted</h4>';
+  bad.forEach(({c,i})=>{
+    if(c.kind==="miss"){
+      const sug=suggestFor(c.value,3);
+      html+=`<div class="fx">The requester typed <span class="typed">${esc(c.value)}</span> — no such person or department in Teramind.<br>`+
+        (sug.length ? 'Did you mean: '+sug.map(a=>`<button type="button" class="sug" data-fix="${i}" data-email="${esc(a.email)}" title="${esc(a.dept||"")}">${esc(a.name)} &lt;${esc(a.email)}&gt;</button>`).join("") : '<span class="muted">No close match — search the box above for the right person.</span>')+
+        ` <button type="button" class="rm" data-rm="${i}">Remove</button></div>`;
+    } else {
+      html+=`<div class="fx">New department <span class="typed">${esc(c.label)}</span>: team member${c.missing.length>1?"s":""} not in Teramind — ${c.missing.map(e=>`<span class="typed">${esc(e)}</span>`).join(", ")}.<br>`+
+        c.missing.map(e=>{ const sug=suggestFor(e,2); return sug.length ? `For ${esc(e)}: `+sug.map(a=>`<button type="button" class="sug" data-fixnd="${i}" data-bad="${esc(e)}" data-email="${esc(a.email)}">${esc(a.name)} &lt;${esc(a.email)}&gt;</button>`).join("") : `For ${esc(e)}: <span class="muted">no close match — the Teramind agent may not be installed yet.</span>`; }).join("<br>")+
+        `</div>`;
+    }
+  });
+  box.innerHTML=html; box.style.display="block";
 }
 function resolveScopeText(text){ return String(text||"").split(/[\n;]+/).map(s=>s.trim()).filter(Boolean).map(resolveEntry).filter(Boolean); }
 function searchDirectory(q, limit){
@@ -989,7 +1039,7 @@ function scopeLine(r){
         const mem=it.members.map(e=>{ const ok=DIR.loaded?!!DIR.byEmail[e]:null; return `<span class="${ok===false?"miss":ok?"ok":""}" title="${ok===false?"Not in Teramind — agent must be installed first":""}">${ok===false?"✗ ":ok?"✓ ":""}${esc(e)}</span>`; }).join(", ");
         return `<span class="newdept" title="${it.exists?"This department already exists in Teramind and will be used":"Requester says this client/department is not in Teramind yet — it will be created on approval and the listed team members moved into it"}">🆕 ${esc(it.label)}${it.exists?" <span class=\"muted\">(exists)</span>":""}</span>${mem?` <span class="muted">— members: ${mem}</span>`:""}`;
       }
-      if(it.kind==="miss") return `<span class="miss" title="No matching person or department in Teramind — fix before approving"><span class="chk">✗</span>${esc(it.label)}</span>`;
+      if(it.kind==="miss") return `<span class="miss" title="No matching person or department in Teramind — fix before approving"><span class="chk">✗</span>${esc(it.label)}</span><span class="needs-fix">needs correction</span>`;
       if(it.kind==="unknown") return `<span>${esc(it.label)}</span>`;
       return `<span class="ok" title="${esc(it.kind==="dept"?"Department in Teramind":"Team member in Teramind: "+(it.sub||""))}"><span class="chk">✓</span>${esc(it.label)}</span>`;
     }).join(' <span class="muted">·</span> ');
@@ -1034,7 +1084,8 @@ function render(){
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=stLow==="revoked";
       const canApprove = (stLow==="pending"||stLow==="in progress");
-      const approveBtn = canApprove ? `<button class="btn-approve" data-act="approve" title="Approve this request and queue the Teramind grant"${r.owner?"":" disabled"}>Approve &amp; grant</button>${r.owner?"":'<span class="muted" style="font-size:11px">Assign an owner first</span>'}` : "";
+      const scopeBad = DIR.loaded && canApprove && resolveScopeText(r.subjects&&/^(approved|done|revoked)$/i.test(r.status||"")?r.subjects:r.scope).some(it=>it.kind==="miss"||(it.kind==="newdept"&&it.missing&&it.missing.length));
+      const approveBtn = canApprove ? `<button class="btn-approve${scopeBad?" warn":""}" data-act="approve" title="${scopeBad?"The requester's entry doesn't match anyone in Teramind — you'll be asked to pick the correct person before granting":"Approve this request and queue the Teramind grant"}"${r.owner?"":" disabled"}>${scopeBad?"Fix &amp; grant":"Approve &amp; grant"}</button>${r.owner?"":'<span class="muted" style="font-size:11px">Assign an owner first</span>'}` : "";
       const actionCell = isRevoked
         ? '<span class="muted">Revoked</span>'
         : `<div class="act-cell">${approveBtn}${(stLow==="done"&&r.policyId)?`<button class="btn-edit" data-act="edit" title="Change who they may view, the access types or the window — the Teramind policy is updated in place">Edit</button>`:""}<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button></div>`;
@@ -1201,6 +1252,7 @@ function closeGrantModal(){ $("grantModal").classList.remove("open"); grantTarge
 let CHIPS=[], SUG=[], sugIdx=-1;
 function chipsValue(){ return CHIPS.map(c=>c.value); }
 function renderChips(){
+  try{ renderFixBox(); }catch(e){}
   $("gmChips").innerHTML = CHIPS.map((c,i)=>{
     const cls = c.kind==="dept"?"c-dept" : c.kind==="agent"?"c-agent" : c.kind==="miss"?"c-miss" : c.kind==="newdept"?(c.missing&&c.missing.length?"c-miss":"c-new"):"";
     const sub = c.kind==="miss" ? "not in Teramind" : (c.sub||"");
@@ -1238,6 +1290,13 @@ function wirePicker(){
   $("gmChips").addEventListener("click", (e)=>{ const x=e.target.closest(".x"); if(!x) return; CHIPS.splice(+x.getAttribute("data-i"),1); renderChips(); });
   $("gmPicker").addEventListener("click", (e)=>{ if(e.target===$("gmPicker")||e.target===$("gmChips")) inp.focus(); });
   document.addEventListener("click", (e)=>{ if(!e.target.closest("#gmPicker")) closeSug(); });
+  $("gmFix").addEventListener("click", (e)=>{
+    const b=e.target.closest("button"); if(!b) return;
+    if(b.hasAttribute("data-fix")){ const i=+b.getAttribute("data-fix"); CHIPS[i]=resolveEntry(b.getAttribute("data-email")); renderChips(); }
+    else if(b.hasAttribute("data-rm")){ CHIPS.splice(+b.getAttribute("data-rm"),1); renderChips(); }
+    else if(b.hasAttribute("data-fixnd")){ const i=+b.getAttribute("data-fixnd"); const c=CHIPS[i]; const bad=b.getAttribute("data-bad"), good=b.getAttribute("data-email").toLowerCase();
+      CHIPS[i]=newDeptChip(c.label, c.members.map(m=>m===bad?good:m)); renderChips(); }
+  });
   $("gmNewDept").onclick=()=>{
     const name=prompt("New client / department name — exactly as it should appear in Teramind:"); if(!name||!name.trim()) return;
     const em=prompt("Team members under "+name.trim()+" (emails, separated by commas). They must already exist in Teramind:")||"";
@@ -1280,7 +1339,7 @@ async function confirmGrant(){
   const days=parseInt($("gmDays").value,10);
   if($("gmSearch").value.trim()) commitSearch();                 // don't lose a half-typed entry
   const missing=CHIPS.filter(c=>c.kind==="miss").map(c=>c.label);
-  if(missing.length) return gmError("Not in Teramind: "+missing.join(", ")+". Remove these or pick the right person/department.");
+  if(missing.length){ renderFixBox(); $("gmFix").scrollIntoView({block:"center"}); return gmError("Not in Teramind: "+missing.join(", ")+". Use the red box above to pick the correct person, or remove the entry."); }
   const ndMissing=CHIPS.filter(c=>c.kind==="newdept"&&c.missing&&c.missing.length).map(c=>c.label+": "+c.missing.join(", "));
   if(ndMissing.length) return gmError("Team members not in Teramind yet — "+ndMissing.join(" · ")+". The Teramind agent must be installed on their PC before the department can be created. Set the request to In progress and tell the requester.");
   const ndEmpty=CHIPS.filter(c=>c.kind==="newdept"&&!c.exists&&!c.members.length).map(c=>c.label);
