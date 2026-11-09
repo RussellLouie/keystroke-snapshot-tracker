@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · edit-grant build -->
+<!-- GoTeam Access Request Center · edit-grant build 2 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -772,6 +772,7 @@ async function saveTrackingInner(rec, fields){
     if(newSt==="done" && !out.doneAt) out.doneAt = when;
     if(newSt!=="done" && newSt!=="revoked") out.doneAt = "";
   }
+  if(isEdit) out.doneAt = base.doneAt;     // edit: window keeps counting from the original grant
   if(!("policyId" in fields)) out.policyId = base.policyId;    // automation-owned unless explicitly linked
   const hold = (out.hold===true||out.hold===1||isTruthyCell(out.hold)) ? 1 : "";
   const vals = [[id, out.status||"Pending", out.notes||"", out.owner||"", who, when, out.doneAt||"", out.requester, out.content, out.accessDays==null?"":out.accessDays, out.submitted||"", out.submitMinLocal==null?"":out.submitMinLocal, out.policyId||"", hold, out.subjects||"", out.approvedBy||"", out.approvedAt||"", out.feature||""]];
@@ -956,10 +957,13 @@ function renderStats(){
 
 // "Who to view" line under the description, with a per-entry Teramind check once the directory is loaded.
 function scopeLine(r){
-  if(!r.scope && !r.reqDays) return "";
+  // After approval the authoritative scope is what IT approved (r.subjects), not what the requester typed.
+  const approved = r.subjects && /^(approved|done|revoked)$/i.test(r.status||"");
+  const scopeText = approved ? r.subjects : r.scope;
+  if(!scopeText && !r.reqDays) return "";
   let parts="";
-  if(r.scope){
-    const items=resolveScopeText(r.scope);
+  if(scopeText){
+    const items=resolveScopeText(scopeText);
     parts=items.map(it=>{
       if(it.kind==="miss") return `<span class="miss" title="No matching person or department in Teramind — fix before approving"><span class="chk">✗</span>${esc(it.label)}</span>`;
       if(it.kind==="unknown") return `<span>${esc(it.label)}</span>`;
@@ -968,7 +972,8 @@ function scopeLine(r){
   }
   const rq=requesterCheck(r);
   const rqHtml = rq ? (rq.ok ? "" : ` <span class="miss" title="The requester's sign-in email does not match any Teramind employee">· requester ${esc(rq.text)}</span>`) : "";
-  return `<div class="req-scope">${parts?`<span title="Who the requester asked to view">👁 ${parts}</span>`:""}${r.reqDays?`<span class="muted"> · asked for ${esc(r.reqDays)}</span>`:""}${rqHtml}</div>`;
+  const scopeTitle = approved ? "Who they may view (as approved by IT)" : "Who the requester asked to view";
+  return `<div class="req-scope">${parts?`<span title="${scopeTitle}">👁 ${parts}</span>`:""}${r.reqDays?`<span class="muted"> · asked for ${esc(r.reqDays)}</span>`:""}${rqHtml}</div>`;
 }
 
 function render(){
@@ -1118,7 +1123,7 @@ function openGrantModal(rec, edit){
   grantTarget=rec; grantEdit=!!edit;
   $("gmTitle").textContent = edit ? "Edit Teramind access (policy #"+rec.policyId+")" : "Approve & grant Teramind access";
   $("gmIntro").innerHTML = edit
-    ? "Change what this person may view, which access they have, or the access window. The automation <strong>updates the existing policy in place</strong> within a few seconds (the policy number stays the same) and the window restarts from today."
+    ? "Change what this person may view, which access they have, or the access window. The automation <strong>updates the existing policy in place</strong> within a few seconds (the policy number stays the same). The access window keeps counting from the original grant date — change the days if you want to extend or shorten it."
     : "Approving queues the grant. The automation creates a scoped Access Control policy in Teramind within a few minutes, records the policy ID here, sets the request to <strong>Done</strong>, and emails the requester. Access is removed automatically when the window ends.";
   $("gmRequester").value=rec.requester||"";
   // Prefer the sign-in email recorded by the form; fall back to a first.last@go.team guess from the name.
@@ -1236,7 +1241,8 @@ async function confirmGrant(){
     if(!DRIVE_ID) await resolveWorkbook();
     const editPid = grantEdit ? String(rec.policyId||"") : "";
     await queueGrant({ responseId:rec.id, requesterName:rec.requester||"", requesterEmail:email, feature, subjects:subjects.join("; "), accessDays:days, ticket, approvedBy:who, approvedAt:when, policyId:editPid });
-    const f={ status:"Approved", accessDays:days, subjects:subjects.join("; "), approvedBy:who, approvedAt:when, feature, policyId:editPid, doneAt:"", _edit:grantEdit };
+    const f={ status:"Approved", accessDays:days, subjects:subjects.join("; "), approvedBy:who, approvedAt:when, feature, policyId:editPid, _edit:grantEdit };
+    if(!grantEdit) f.doneAt="";            // an edit keeps the original grant date, so the countdown continues
     if(ticket && !rec.ticketId) f.notes=(rec.notes?rec.notes+" | ":"")+"Ticket "+ticket;
     if(grantEdit) f.notes=("Grant edited by "+who+" "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})+(f.notes?" | "+f.notes:(rec.notes?" | "+rec.notes:"")));
     await withRetry(()=>saveTracking(rec, f));
