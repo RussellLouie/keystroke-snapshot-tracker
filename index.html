@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · needs-correction build -->
+<!-- GoTeam Access Request Center · other-option build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -488,10 +488,17 @@ async function loadDirectory(){
 // Resolve one typed entry (email, person name or department name) against the directory.
 // "new:Name[a@go.team, b@go.team]" (stored form) or "NEW DEPARTMENT: Name | members: a@…" (as the form flow writes it)
 function parseNewDept(t){
-  let m=t.match(/^new:\s*([^\[]+?)\s*(?:\[([^\]]*)\])?\s*$/i) || t.match(/^NEW DEPARTMENT:\s*(.+?)\s*(?:\|\s*members?:\s*(.*))?$/i);
+  let m=t.match(/^new:\s*([^\[]+?)\s*(?:\[([^\]]*)\])?\s*$/i);
+  if(m){ return { name:m[1].trim(), members:(m[2]||"").split(/[\s,;]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.indexOf("@")>=0) }; }
+  m=t.match(/^NEW DEPARTMENT:\s*([\s\S]+)$/i);
   if(!m) return null;
-  const name=m[1].trim(); const members=(m[2]||"").split(/[\s,;]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.indexOf("@")>=0);
-  return { name, members };
+  // Free text from the form's "Other" box, e.g. "Acme Pty Ltd: jane@go.team, john@go.team" or "Acme - jane@go.team jane2@go.team".
+  // Emails can be anywhere; the name is whatever is left once emails, the word "members" and separators are removed.
+  const raw=m[1].trim();
+  const members=[...new Set((raw.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi)||[]).map(e=>e.toLowerCase()))];
+  let name=raw.replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi," ").replace(/\bmembers?\b/gi," ").replace(/[|:;,\-–—]+\s*$/g," ").replace(/\s*[|:;,\-–—]+\s*(?=\s*$)/g,"");
+  name=name.replace(/\s*[|:;,–—]\s*/g," ").replace(/\s{2,}/g," ").replace(/^[\s\-:|,]+|[\s\-:|,]+$/g,"").trim();
+  return { name: name||"(name not given)", members };
 }
 function newDeptChip(name, members){
   const checked = members.map(e=>({ email:e, ok: DIR.loaded ? !!DIR.byEmail[e] : null }));
@@ -1141,8 +1148,8 @@ function wire(){
   $("copyDeptsBtn").addEventListener("click", async (ev)=>{
     if(!DIR.loaded) return showBanner("Teramind directory not loaded yet — try again in a moment.","err");
     const names=DIR.depts.map(d=>d.name).filter(Boolean).sort((a,b)=>a.localeCompare(b));
-    const txt=names.join("\n")+"\nNot in the list (I'll type it on the next question)";
-    try{ await navigator.clipboard.writeText(txt); showBanner(names.length+" departments copied. In the form, open question 5, click the first option and paste — Forms adds one option per line (choose \"Replace\" if asked).","info"); }
+    const txt=names.join("\n");
+    try{ await navigator.clipboard.writeText(txt); showBanner(names.length+" departments copied. In the form, open question 5, click the first option and paste — Forms adds one option per line (keep the built-in \"Other\" option).","info"); }
     catch(e){ showBanner("Couldn't copy — your browser blocked clipboard access.","err"); }
   });
   // Read-only users: any attempt to use a row control gets the "not permitted" prompt and the control is reset.
