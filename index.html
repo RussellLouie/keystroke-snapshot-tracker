@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · other-option build -->
+<!-- GoTeam Access Request Center · new-dept-branch build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1149,7 +1149,7 @@ function wire(){
     if(!DIR.loaded) return showBanner("Teramind directory not loaded yet — try again in a moment.","err");
     const names=DIR.depts.map(d=>d.name).filter(Boolean).sort((a,b)=>a.localeCompare(b));
     const txt=names.join("\n");
-    try{ await navigator.clipboard.writeText(txt); showBanner(names.length+" departments copied. In the form, open question 5, click the first option and paste — Forms adds one option per line (keep the built-in \"Other\" option).","info"); }
+    try{ await navigator.clipboard.writeText(txt); showBanner(names.length+" departments copied. In the form, open question 7 (the department drop-down), click the first option, select all and paste — Forms adds one option per line.","info"); }
     catch(e){ showBanner("Couldn't copy — your browser blocked clipboard access.","err"); }
   });
   // Read-only users: any attempt to use a row control gets the "not permitted" prompt and the control is reset.
