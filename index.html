@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · feature-rules build -->
+<!-- GoTeam Access Request Center · new-department build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -176,6 +176,8 @@
   .chip{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px 4px 10px; border-radius:999px; font-size:12.5px; font-weight:600; background:#eef1f6; color:#33405a; max-width:100%; }
   .chip.c-dept{ background:#e8f0ff; color:#1e50b0; } .chip.c-agent{ background:#d9f7ee; color:#0f766e; }
   .chip.c-miss{ background:#fee2e2; color:#b42318; }
+  .chip.c-new{ background:#fef3c7; color:#92400e; cursor:pointer; }
+  .req-scope .newdept{ color:#92400e; font-weight:600; }
   .chip .sub{ font-weight:400; color:inherit; opacity:.75; font-size:11px; }
   .chip .x{ border:none; background:transparent; color:inherit; cursor:pointer; font-size:14px; line-height:1; padding:0 2px; opacity:.7; }
   .chip .x:hover{ opacity:1; }
@@ -267,6 +269,7 @@
         </div>
         <div class="right">
           <button class="btn-ghost" id="copyLinkBtn" title="Copy the request form link">🔗 Copy form link</button>
+          <button class="btn-ghost" id="copyDeptsBtn" title="Copy the current Teramind department/client list (one per line) to paste into the form's dropdown options when new clients have been added">📋 Dept list for form</button>
           <button class="btn-ghost" id="emailLinkBtn" title="Email the request form link">✉ Email form</button>
           <button class="btn-ghost" id="reloadBtn">↻ Reload</button>
         </div>
@@ -343,7 +346,7 @@
             <div class="sug" id="gmSug"></div>
           </div>
           <div class="hint" id="gmPickHint">Pick from Teramind's people and departments. Entries marked <span class="chip-miss-demo">not in Teramind</span> must be fixed or removed before approving.</div>
-          <div class="hint" style="margin-top:6px"><button type="button" class="btn-ghost btn-xs" id="gmOwnDept">+ Requester's own department</button></div>
+          <div class="hint" style="margin-top:6px"><button type="button" class="btn-ghost btn-xs" id="gmOwnDept">+ Requester's own department</button> <button type="button" class="btn-ghost btn-xs" id="gmNewDept" title="Client/department not in Teramind yet: it is created on approval and the listed team members are moved into it. Departments are never deleted automatically.">+ New department…</button></div>
           <textarea id="gmSubjects" style="display:none"></textarea></div>
         <div class="m-row">
           <div><label>Ticket</label><input type="text" id="gmTicket" placeholder="e.g. INC-1234"><div class="hint" id="gmTicketHint">Required for keystroke access.</div></div>
@@ -473,8 +476,24 @@ async function loadDirectory(){
   }catch(e){ /* keep whatever is loaded (cache or nothing) — picker falls back to free text */ }
 }
 // Resolve one typed entry (email, person name or department name) against the directory.
+// "new:Name[a@go.team, b@go.team]" (stored form) or "NEW DEPARTMENT: Name | members: a@…" (as the form flow writes it)
+function parseNewDept(t){
+  let m=t.match(/^new:\s*([^\[]+?)\s*(?:\[([^\]]*)\])?\s*$/i) || t.match(/^NEW DEPARTMENT:\s*(.+?)\s*(?:\|\s*members?:\s*(.*))?$/i);
+  if(!m) return null;
+  const name=m[1].trim(); const members=(m[2]||"").split(/[\s,;]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.indexOf("@")>=0);
+  return { name, members };
+}
+function newDeptChip(name, members){
+  const checked = members.map(e=>({ email:e, ok: DIR.loaded ? !!DIR.byEmail[e] : null }));
+  const missing = checked.filter(x=>x.ok===false).map(x=>x.email);
+  const exists = DIR.loaded && DIR.deptByName[normName(name)];
+  return { kind:"newdept", label:name, members, missing, exists:!!exists,
+           sub: exists ? "department already exists — will be used" : ("new department · "+members.length+" member"+(members.length===1?"":"s")+(missing.length?" · "+missing.length+" not in Teramind":"")),
+           value:"new:"+name+"["+members.join(", ")+"]" };
+}
 function resolveEntry(text){
   const t=String(text||"").trim(); if(!t) return null;
+  const nd=parseNewDept(t); if(nd) return newDeptChip(nd.name, nd.members);
   if(!DIR.loaded) return { kind:"unknown", label:t, value:t, unverified:true };
   if(t.indexOf("@")>=0){ const a=DIR.byEmail[t.toLowerCase()]; return a ? { kind:"agent", label:a.name, sub:a.email, value:a.email, id:a.id, dept:a.dept } : { kind:"miss", label:t, value:t }; }
   const n=normName(t);
@@ -966,6 +985,10 @@ function scopeLine(r){
   if(scopeText){
     const items=resolveScopeText(scopeText);
     parts=items.map(it=>{
+      if(it.kind==="newdept"){
+        const mem=it.members.map(e=>{ const ok=DIR.loaded?!!DIR.byEmail[e]:null; return `<span class="${ok===false?"miss":ok?"ok":""}" title="${ok===false?"Not in Teramind — agent must be installed first":""}">${ok===false?"✗ ":ok?"✓ ":""}${esc(e)}</span>`; }).join(", ");
+        return `<span class="newdept" title="${it.exists?"This department already exists in Teramind and will be used":"Requester says this client/department is not in Teramind yet — it will be created on approval and the listed team members moved into it"}">🆕 ${esc(it.label)}${it.exists?" <span class=\"muted\">(exists)</span>":""}</span>${mem?` <span class="muted">— members: ${mem}</span>`:""}`;
+      }
       if(it.kind==="miss") return `<span class="miss" title="No matching person or department in Teramind — fix before approving"><span class="chk">✗</span>${esc(it.label)}</span>`;
       if(it.kind==="unknown") return `<span>${esc(it.label)}</span>`;
       return `<span class="ok" title="${esc(it.kind==="dept"?"Department in Teramind":"Team member in Teramind: "+(it.sub||""))}"><span class="chk">✓</span>${esc(it.label)}</span>`;
@@ -1064,6 +1087,13 @@ function wire(){
   $("tbody").addEventListener("click", onRevoke);
   $("tbody").addEventListener("click", onApproveClick);
   $("tbody").addEventListener("click", onLinkPolicy);
+  $("copyDeptsBtn").addEventListener("click", async (ev)=>{
+    if(!DIR.loaded) return showBanner("Teramind directory not loaded yet — try again in a moment.","err");
+    const names=DIR.depts.map(d=>d.name).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+    const txt=names.join("\n")+"\nNot in the list (I'll type it on the next question)";
+    try{ await navigator.clipboard.writeText(txt); showBanner(names.length+" departments copied. In the form, open question 5, click the first option and paste — Forms adds one option per line (choose \"Replace\" if asked).","info"); }
+    catch(e){ showBanner("Couldn't copy — your browser blocked clipboard access.","err"); }
+  });
   // Read-only users: any attempt to use a row control gets the "not permitted" prompt and the control is reset.
   $("tbody").addEventListener("mousedown", (e)=>{ const el=e.target.closest('[data-ro="1"]'); if(!el) return; e.preventDefault(); el.blur(); notApproverPrompt("edit requests"); }, true);
   $("tbody").addEventListener("keydown", (e)=>{ const el=e.target.closest('[data-ro="1"]'); if(!el) return; if(e.key==="Tab") return; e.preventDefault(); notApproverPrompt("edit requests"); }, true);   // hand-made policy → auto-revoke
@@ -1172,7 +1202,7 @@ let CHIPS=[], SUG=[], sugIdx=-1;
 function chipsValue(){ return CHIPS.map(c=>c.value); }
 function renderChips(){
   $("gmChips").innerHTML = CHIPS.map((c,i)=>{
-    const cls = c.kind==="dept"?"c-dept" : c.kind==="agent"?"c-agent" : c.kind==="miss"?"c-miss":"";
+    const cls = c.kind==="dept"?"c-dept" : c.kind==="agent"?"c-agent" : c.kind==="miss"?"c-miss" : c.kind==="newdept"?(c.missing&&c.missing.length?"c-miss":"c-new"):"";
     const sub = c.kind==="miss" ? "not in Teramind" : (c.sub||"");
     return `<span class="chip ${cls}" title="${esc(c.kind==="miss"?"No matching person or department in Teramind. Remove it, or search for the right one.":(c.sub||""))}">${esc(c.label)}${sub?` <span class="sub">${esc(sub)}</span>`:""}<button type="button" class="x" data-i="${i}" aria-label="Remove">×</button></span>`;
   }).join("");
@@ -1208,6 +1238,19 @@ function wirePicker(){
   $("gmChips").addEventListener("click", (e)=>{ const x=e.target.closest(".x"); if(!x) return; CHIPS.splice(+x.getAttribute("data-i"),1); renderChips(); });
   $("gmPicker").addEventListener("click", (e)=>{ if(e.target===$("gmPicker")||e.target===$("gmChips")) inp.focus(); });
   document.addEventListener("click", (e)=>{ if(!e.target.closest("#gmPicker")) closeSug(); });
+  $("gmNewDept").onclick=()=>{
+    const name=prompt("New client / department name — exactly as it should appear in Teramind:"); if(!name||!name.trim()) return;
+    const em=prompt("Team members under "+name.trim()+" (emails, separated by commas). They must already exist in Teramind:")||"";
+    const members=em.split(/[\s,;]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.indexOf("@")>=0);
+    addChip(newDeptChip(name.trim(), members));
+  };
+  // click a new-department chip to edit its member list
+  $("gmChips").addEventListener("click", (e)=>{
+    const ch=e.target.closest(".chip.c-new,.chip.c-miss"); if(!ch||e.target.closest(".x")) return;
+    const i=[...$("gmChips").children].indexOf(ch); const c=CHIPS[i]; if(!c||c.kind!=="newdept") return;
+    const em=prompt("Team members under "+c.label+" (emails, comma-separated):", c.members.join(", ")); if(em==null) return;
+    CHIPS[i]=newDeptChip(c.label, em.split(/[\s,;]+/).map(x=>x.trim().toLowerCase()).filter(x=>x.indexOf("@")>=0)); renderChips();
+  });
   $("gmOwnDept").onclick=()=>{
     const rec=grantTarget; if(!rec) return;
     const em=$("gmEmail").value.trim().toLowerCase();
@@ -1238,6 +1281,10 @@ async function confirmGrant(){
   if($("gmSearch").value.trim()) commitSearch();                 // don't lose a half-typed entry
   const missing=CHIPS.filter(c=>c.kind==="miss").map(c=>c.label);
   if(missing.length) return gmError("Not in Teramind: "+missing.join(", ")+". Remove these or pick the right person/department.");
+  const ndMissing=CHIPS.filter(c=>c.kind==="newdept"&&c.missing&&c.missing.length).map(c=>c.label+": "+c.missing.join(", "));
+  if(ndMissing.length) return gmError("Team members not in Teramind yet — "+ndMissing.join(" · ")+". The Teramind agent must be installed on their PC before the department can be created. Set the request to In progress and tell the requester.");
+  const ndEmpty=CHIPS.filter(c=>c.kind==="newdept"&&!c.exists&&!c.members.length).map(c=>c.label);
+  if(ndEmpty.length) return gmError("New department "+ndEmpty.join(", ")+" has no team members listed. Click it to add their emails, or the department would be created empty.");
   if(DIR.loaded && !DIR.byEmail[email]) return gmError("The requester email "+email+" does not match anyone in Teramind. Correct it before approving.");
   const subjects=chipsValue();
   const ticket=$("gmTicket").value.trim();
