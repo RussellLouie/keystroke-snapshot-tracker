@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · pinned-actions build -->
+<!-- GoTeam Access Request Center · owner-first build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -230,6 +230,14 @@
   .btn-del{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; }
   .btn-del:hover{ background:#fef2f2; } .btn-del:disabled{ opacity:.55; cursor:default; }
   select.owner-sel{ padding:6px 9px; border:1px solid var(--line); border-radius:8px; font:inherit; background:#fff; color:#33405a; max-width:150px; }
+  /* "assign an owner first" cues */
+  select.owner-sel.owner-missing{ border-color:#f0b429; background:#fffbeb; color:#92600e; font-weight:600; box-shadow:0 0 0 3px rgba(240,180,41,.18); }
+  .owner-hint{ font-size:10.5px; color:#b7791f; font-weight:600; margin-top:3px; white-space:nowrap; }
+  .btn-approve.needs-owner{ background:#e5e9f0; border-color:#e5e9f0; color:#8a93a6; cursor:not-allowed; }
+  .owner-first{ display:block; font-size:11px; color:#b7791f; font-weight:600; margin-top:2px; white-space:nowrap; }
+  @keyframes flashOwner{ 0%,100%{ box-shadow:0 0 0 3px rgba(240,180,41,.18);} 50%{ box-shadow:0 0 0 6px rgba(240,180,41,.55); transform:scale(1.04);} }
+  select.owner-sel.flash{ animation:flashOwner .45s ease-in-out 3; }
+  .banner.warn{ background:#fffbeb; color:#92600e; border:1px solid #f6d98a; display:block; font-weight:600; }
   .btn-revoke{ background:#fff; color:#b42318; border:1px solid #fecdca; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; white-space:nowrap; }
   .btn-edit{ background:#fff; color:#1f4fb8; border:1px solid #c7d7fb; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }
   .btn-edit:hover{ background:#eef3fe; }
@@ -671,8 +679,8 @@ const msalApp = new msal.PublicClientApplication({
 let account = null;
 
 const $ = id => document.getElementById(id);
-function showBanner(msg, kind){ const b=$("banner"); b.textContent=msg; b.className="banner "+(kind||"info"); }
-function hideBanner(){ $("banner").className="banner"; }
+function showBanner(msg, kind){ const b=$("banner"); b.textContent=msg; b.className="banner "+(kind||"info"); if(typeof fitTable==="function") setTimeout(fitTable,0); }
+function hideBanner(){ $("banner").className="banner"; if(typeof fitTable==="function") setTimeout(fitTable,0); }
 
 async function getToken(){
   const req = { scopes: SCOPES, account };
@@ -1163,7 +1171,9 @@ function render(){
       const isRevoked=stLow==="revoked";
       const canApprove = (stLow==="pending"||stLow==="in progress");
       const scopeBad = DIR.loaded && canApprove && resolveScopeText(r.subjects&&/^(approved|done|revoked)$/i.test(r.status||"")?r.subjects:r.scope).some(it=>it.kind==="miss"||(it.kind==="newdept"&&it.missing&&it.missing.length));
-      const approveBtn = canApprove ? `<button class="btn-approve${scopeBad?" warn":""}" data-act="approve" title="${scopeBad?"The requester's entry doesn't match anyone in Teramind — you'll be asked to pick the correct person before granting":"Approve this request and queue the Teramind grant"}"${r.owner?"":" disabled"}>${scopeBad?"Fix &amp; grant":"Approve &amp; grant"}</button>${r.owner?"":'<span class="muted" style="font-size:11px">Assign an owner first</span>'}` : "";
+      const approveBtn = canApprove ? (r.owner
+        ? `<button class="btn-approve${scopeBad?" warn":""}" data-act="approve" title="${scopeBad?"The requester's entry doesn't match anyone in Teramind — you'll be asked to pick the correct person before granting":"Approve this request and queue the Teramind grant"}">${scopeBad?"Fix &amp; grant":"Approve &amp; grant"}</button>`
+        : `<button class="btn-approve needs-owner" data-act="approve" title="Step 1: pick an owner in the Owner column. Approval is only possible once someone in IT owns this request.">${scopeBad?"Fix &amp; grant":"Approve &amp; grant"}</button><span class="owner-first">⚠ Assign an owner first</span>`) : "";
       const actionCell = isRevoked
         ? '<span class="muted">Revoked</span>'
         : `<div class="act-cell">${approveBtn}${(stLow==="done"&&r.policyId)?`<button class="btn-edit" data-act="edit" title="Change who they may view, the access types or the window — the Teramind policy is updated in place">Edit</button>`:""}<button class="btn-revoke" data-act="revoke" title="Revoke access (keeps an audit record)">Revoke</button></div>`;
@@ -1177,7 +1187,7 @@ function render(){
         <td class="content">${r.reqNotes?`<div class="clamp" title="${esc(r.reqNotes)}">${esc(r.reqNotes)}</div>`:'<span class="muted">—</span>'}</td>
         <td>${accessCell}</td>
         <td class="policy-cell">${policyCell}</td>
-        <td><select class="owner-sel" data-act="owner"${ro?' data-ro="1"':""}>${ownerOpts}</select></td>
+        <td><select class="owner-sel${(!r.owner&&canApprove)?" owner-missing":""}" data-act="owner"${ro?' data-ro="1"':""} title="${(!r.owner&&canApprove)?"No owner yet — assign who in IT is handling this request before approving":""}">${ownerOpts}</select>${(!r.owner&&canApprove)?'<div class="owner-hint">← assign first</div>':""}</td>
         <td><select class="status-sel ${statusClass(r.status)}" data-act="status"${ro?' data-ro="1"':""}>${opts}</select></td>
         <td class="lastup">${lastUp}</td>
         <td><input class="notes-in" data-act="notes" value="${esc(r.notes)}" placeholder="Add note…"${ro?' data-ro="1" readonly':""}> <span class="saving" data-role="save"></span></td>
@@ -1262,7 +1272,7 @@ async function onEdit(e){
   const fields={};
   if(act==="status"){ const sel=tr.querySelector('[data-act="status"]'); fields.status=sel.value; sel.className="status-sel "+statusClass(sel.value); }
   if(act==="notes"){ fields.notes=tr.querySelector('[data-act="notes"]').value; }
-  if(act==="owner"){ fields.owner=tr.querySelector('[data-act="owner"]').value; }
+  if(act==="owner"){ fields.owner=tr.querySelector('[data-act="owner"]').value; if(fields.owner && $("banner").classList.contains("warn")){ $("banner").className="banner"; } }
   if(act==="hold"){ fields.hold=tr.querySelector('[data-act="hold"]').checked?1:""; }
   if(act==="days"){
     const dayIn=tr.querySelector('[data-act="days"]'); const raw=dayIn.value.trim();
@@ -1483,6 +1493,13 @@ function onApproveClick(e){
   if(!canEdit()) return notApproverPrompt(edit ? "edit a Teramind grant" : "grant Teramind access");
   const tr=btn.closest("tr"); const id=tr.getAttribute("data-id");
   const rec=rows.find(x=>x.id===id); if(!rec) return;
+  if(!edit && !rec.owner){
+    // Step 1 is always to take ownership: point at the Owner dropdown and say so.
+    const sel=tr.querySelector('select[data-act="owner"]');
+    showBanner("Assign an owner first — pick who in IT is handling "+(rec.requester||"this request")+" in the Owner column, then click Approve & grant.","warn");
+    if(sel){ sel.classList.remove("flash"); void sel.offsetWidth; sel.classList.add("flash"); sel.scrollIntoView({block:"nearest",inline:"nearest"}); sel.focus(); }
+    return;
+  }
   openGrantModal(rec, edit);
 }
 
