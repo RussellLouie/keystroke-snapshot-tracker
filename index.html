@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · link-manual-policy build (10 Nov) -->
+<!-- GoTeam Access Request Center · link-by-name build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -162,6 +162,13 @@
   .modal .hint{ font-size:11.5px; color:#8a93a6; margin-top:3px; }
   .modal .m-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .modal .m-foot{ display:flex; justify-content:flex-end; gap:10px; padding:14px 22px 20px; border-top:1px solid var(--line2); margin-top:8px; }
+  .pol-list{ margin-top:6px; border:1px solid var(--line); border-radius:8px; max-height:240px; overflow:auto; display:none; }
+  .pol-list.open{ display:block; }
+  .pol-item{ padding:8px 10px; cursor:pointer; border-bottom:1px solid var(--line2); font-size:13px; }
+  .pol-item:last-child{ border-bottom:0; } .pol-item:hover, .pol-item.sel{ background:#eef4ff; }
+  .pol-item .pn{ font-weight:600; color:#1f2a44; } .pol-item .pm{ font-size:11.5px; color:#8a93a6; margin-top:2px; }
+  .pol-item.asis{ color:#8a6d1f; background:#fff8e6; } .pol-item.asis:hover{ background:#fdf0cc; }
+  .pol-picked{ margin-top:6px; padding:8px 10px; border-radius:8px; background:#eaf7ef; border:1px solid #bfe3cc; font-size:13px; }
   .modal .feat-list{ display:grid; gap:6px; padding:4px 0; }
   .modal .feat{ display:flex; align-items:center; gap:8px; font-weight:500; font-size:13.5px; color:#1f2a44; margin:0; cursor:pointer; }
   .modal .feat input{ margin:0; } .modal .feat .hint{ margin:0; }
@@ -371,6 +378,31 @@
     </div>
   </div>
 
+  <!-- Link an existing (hand-made) Teramind policy to a request -->
+  <div class="modal-bg" id="linkModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lmTitle">
+      <h2 id="lmTitle">Link a Teramind Access Control policy</h2>
+      <div class="m-body">
+        <div class="hint" id="lmIntro" style="margin-top:-4px"></div>
+        <div>
+          <label>Policy name in Teramind</label>
+          <input type="text" id="lmSearch" placeholder="Start typing the policy name as it appears in Teramind → Manage → Access Control" autocomplete="off">
+          <div class="pol-list" id="lmList"></div>
+          <div class="hint" id="lmHint"></div>
+        </div>
+        <div class="m-row" id="lmDaysRow">
+          <div><label>Access window (days, from today)</label><input type="number" id="lmDays" min="1" max="365" step="1"></div>
+          <div><label>Linked by</label><input type="text" id="lmBy" readonly></div>
+        </div>
+        <div class="m-err" id="lmErr"></div>
+      </div>
+      <div class="m-foot">
+        <button class="btn-ghost" id="lmCancel">Cancel</button>
+        <button class="btn-approve" id="lmConfirm" disabled>Link policy</button>
+      </div>
+    </div>
+  </div>
+
 <!-- MSAL -->
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
 <script>
@@ -461,14 +493,21 @@ const DIRECTORY_FILE="tm-directory.json", WORKER_TABLE="WorkerStatusTable", WORK
 /* ============================================================
    Teramind directory (people + departments) for suggestions and validation
    ============================================================ */
-let DIR={ loaded:false, generated:null, agents:[], depts:[], byEmail:{}, byName:{}, deptByName:{} };
+let DIR={ loaded:false, generated:null, agents:[], depts:[], policies:[], byEmail:{}, byName:{}, deptByName:{}, byId:{}, deptById:{}, policyById:{} };
 function normName(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9@. ]+/g," ").replace(/\s+/g," ").trim(); }
 function applyDirectory(j){
-  DIR.agents=j.agents||[]; DIR.depts=j.departments||[]; DIR.generated=j.generated||null;
-  DIR.byEmail={}; DIR.byName={}; DIR.deptByName={};
-  DIR.agents.forEach(a=>{ if(a.email) DIR.byEmail[a.email.toLowerCase()]=a; const n=normName(a.name); if(n){ (DIR.byName[n]=DIR.byName[n]||[]).push(a); } });
-  DIR.depts.forEach(d=>{ DIR.deptByName[normName(d.name)]=d; });
+  DIR.agents=j.agents||[]; DIR.depts=j.departments||[]; DIR.policies=j.policies||[]; DIR.generated=j.generated||null;
+  DIR.byEmail={}; DIR.byName={}; DIR.deptByName={}; DIR.byId={}; DIR.deptById={}; DIR.policyById={};
+  DIR.agents.forEach(a=>{ if(a.email) DIR.byEmail[a.email.toLowerCase()]=a; const n=normName(a.name); if(n){ (DIR.byName[n]=DIR.byName[n]||[]).push(a); } DIR.byId[String(a.id)]=a; });
+  DIR.depts.forEach(d=>{ DIR.deptByName[normName(d.name)]=d; DIR.deptById[String(d.id)]=d; });
+  DIR.policies.forEach(p=>{ DIR.policyById[String(p.id)]=p; });
   DIR.loaded=true;
+}
+// Human-readable summary of a Teramind policy from the published directory: who it is for and what it covers.
+function policySummary(p){
+  const who=(p.subjects||[]).map(s=>{ if(s.t==="agent"){ const a=DIR.byId[String(s.id)]; return a?a.name:("agent #"+s.id); } if(s.t==="department"){ const d=DIR.deptById[String(s.id)]; return d?d.name:("dept #"+s.id); } return s.t+" #"+s.id; });
+  const what=(p.objects||[]).map(o=>{ if(o.t==="agent"){ const a=DIR.byId[String(o.id)]; return a?a.name:("agent #"+o.id); } if(o.t==="department"){ const d=DIR.deptById[String(o.id)]; return d?d.name:("dept #"+o.id); } return o.t+" #"+o.id; });
+  return { who:who.join(", "), what:what.join(", ") };
 }
 const DIR_CACHE_KEY="arc.tmDirectory.v1";
 // The directory is the slowest download (a large JSON via SharePoint), so a cached copy from the last visit
@@ -482,7 +521,7 @@ async function loadDirectory(){
     const raw = await graph("/drives/"+DRIVE_ID+"/root:/"+encodeURIComponent(DIRECTORY_FILE)+":/content");
     const j = (typeof raw==="string") ? JSON.parse(raw) : raw;
     applyDirectory(j);
-    try{ localStorage.setItem(DIR_CACHE_KEY, JSON.stringify({generated:j.generated||null, agents:DIR.agents, departments:DIR.depts})); }catch(e){}
+    try{ localStorage.setItem(DIR_CACHE_KEY, JSON.stringify({generated:j.generated||null, agents:DIR.agents, departments:DIR.depts, policies:DIR.policies})); }catch(e){}
   }catch(e){ /* keep whatever is loaded (cache or nothing) — picker falls back to free text */ }
 }
 // Resolve one typed entry (email, person name or department name) against the directory.
@@ -923,7 +962,17 @@ function featuresForType(t){ const out=[]; typeList(t).forEach(x=>{ x=x.toLowerC
 function featureLabels(f){ return String(f||"").split(/[;,]/).map(x=>x.trim()).filter(Boolean).map(x=>FEATURE_LABELS[x]||x).join(", "); }
 // Name of the Access Control policy as the worker creates it in Teramind:
 //   ARC-<ResponseID> | <requester> | <features> | until <DD Mon YYYY>   (end date in UTC, same as the worker)
+function isNamedPolicy(pid){ return /^name:/i.test(String(pid||"")); }
+// Label for the policy column: a hand-linked policy shows its real Teramind name (from the directory, or as typed);
+// an ARC-created policy shows the ARC naming.
+function policyLabel(r){
+  if(isNamedPolicy(r.policyId)) return String(r.policyId).slice(5).trim();
+  const p=DIR.policyById[String(r.policyId)];
+  if(p && p.name && !/^ARC-/.test(p.name)) return p.name;
+  return policyName(r);
+}
 function policyName(r){
+  if(isNamedPolicy(r.policyId)) return String(r.policyId).slice(5).trim();
   const d=parseWhen(r.doneAt); const days=parseInt(r.accessDays,10)||CONFIG.accessDays;
   let until="";
   if(d){ const u=new Date(d.getTime()+days*86400000); until=u.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}); }
@@ -1088,7 +1137,7 @@ function render(){
       const policyCell = (r.policyId && stLow==="approved")
         ? `<div class="policy-id">policy #${esc(r.policyId)}</div><span class="muted">Updating…</span>`
         : r.policyId
-        ? `<div class="policy-id">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>`
+        ? `<div class="policy-id">${isNamedPolicy(r.policyId)?'<span title="Linked by name — the automation confirms the policy id on its next pass">policy (linked by name)</span>':"policy #"+esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyLabel(r))}</span>`
         : (stLow==="approved" ? '<span class="muted">Granting…</span>'
           : stLow==="done" ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
           : (stLow==="pending"||stLow==="in progress") ? `<button class="btn-link-policy" data-act="link-policy" title="Granted by hand in Teramind? Enter the policy ID: the request is marked Done from today, the access window starts counting and the automation removes the policy when it ends.">Link manual policy…</button>`
@@ -1171,6 +1220,7 @@ function wire(){
   $("gmConfirm").onclick=confirmGrant;
   $("gmFeature").addEventListener("change", ()=>{ enforceFeatureRules(); updateTicketHint(); });
   wirePicker();
+  wireLinkModal();
   $("gmEmail").addEventListener("input", checkEmailField);
   $("grantModal").addEventListener("click",(e)=>{ if(e.target===$("grantModal")) closeGrantModal(); });
   document.addEventListener("keydown",(e)=>{ if(e.key==="Escape" && $("grantModal").classList.contains("open")) closeGrantModal(); });
@@ -1451,38 +1501,91 @@ async function onLinkPolicy(e){
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const me=currentItStaff();
   if(!me || !me.approve) return notApproverPrompt("link a Teramind policy");
+  openLinkModal(rec, me);
+}
+
+/* ---- Link-policy modal: pick a hand-made Teramind policy by NAME (from the directory the worker publishes) ---- */
+let linkTarget=null, linkMe=null, linkPick=null;   // linkPick = {id,name} (id null = link by name, worker resolves it)
+function lmError(msg){ const el=$("lmErr"); el.textContent=msg; el.style.display=msg?"block":"none"; }
+function openLinkModal(rec, me){
+  linkTarget=rec; linkMe=me; linkPick=null;
   const isDone=(rec.status||"").toLowerCase()==="done";
-  const raw=prompt("Teramind Access Control policy ID for "+(rec.requester||id)+"\n\nFind it in Teramind → Manage → Access Control (the number in the policy's URL or list). Once linked, the automation deletes this policy when the access window ends, or when Revoke is clicked.");
-  if(raw==null) return;
-  const pid=String(raw).trim().replace(/^#/,"");
-  if(!/^\d+$/.test(pid)) return showBanner("Policy ID must be a number.","err");
-  // Pending / In progress row: work out the window (row value → what the requester asked for → default) and mark Done from today.
-  let days=NaN;
+  $("lmIntro").innerHTML = "For access that was created by hand in Teramind for <b>"+esc(rec.requester||rec.id)+"</b>. Pick the policy by its name"+
+    (isDone ? "; the automation removes it when this request's window ends or when Revoke is clicked."
+            : ". The request is then marked <b>Done</b> from today"+(rec.owner?"":" with you as owner")+", and the automation removes the policy when the window ends or when Revoke is clicked.");
+  $("lmDaysRow").style.display = isDone ? "none" : "grid";
   if(!isDone){
     let d=(rec.accessDays==null||String(rec.accessDays).trim()==="")?NaN:Number(rec.accessDays);
     if(isNaN(d)||d<=0){ const m=String(rec.reqDays||"").match(/\d+/); if(m) d=parseInt(m[0],10); }
     if(isNaN(d)||d<=0) d=CONFIG.accessDays;
-    const dr=prompt("Access window in days for "+(rec.requester||id)+" (counts from today):", String(d));
-    if(dr==null) return;
-    days=parseInt(String(dr).trim(),10);
-    if(isNaN(days)||days<1||days>365) return showBanner("Access window must be between 1 and 365 days.","err");
+    $("lmDays").value=d;
   }
-  const msg = isDone
-    ? "Link policy #"+pid+" to this request?\n\nIt will be deleted automatically: "+accessInfo(rec).text+"."
-    : "Link policy #"+pid+" to this request?\n\nThe request is marked Done today"+(rec.owner?"":" with you as owner")+", the window is "+days+" day"+(days===1?"":"s")+", and the automation deletes the policy when it ends (or when Revoke is clicked).";
-  if(!confirm(msg)) return;
-  btn.textContent="Linking…"; btn.disabled=true;
+  $("lmBy").value=me.name;
+  $("lmSearch").value=rec.requester||""; lmError("");
+  $("lmConfirm").disabled=true; $("lmConfirm").textContent="Link policy";
+  $("lmHint").textContent = DIR.policies.length
+    ? DIR.policies.length+" policies known (list refreshed by the automation every 5 min). A policy created in the last few minutes may not be listed yet — type its exact name and choose \"use this name\"."
+    : "The policy list is not available yet — type the policy's exact name as it appears in Teramind; the automation will match it.";
+  $("linkModal").classList.add("open");
+  renderLinkList();
+  setTimeout(()=>{ $("lmSearch").focus(); $("lmSearch").select(); },50);
+}
+function closeLinkModal(){ $("linkModal").classList.remove("open"); linkTarget=null; linkPick=null; }
+function renderLinkList(){
+  const q=normName($("lmSearch").value); const list=$("lmList");
+  if(linkPick){
+    list.className="pol-list"; list.innerHTML="";
+    const picked=document.getElementById("lmPicked")||(()=>{ const d=document.createElement("div"); d.id="lmPicked"; d.className="pol-picked"; list.parentNode.insertBefore(d,list.nextSibling); return d; })();
+    picked.style.display="block";
+    picked.innerHTML = linkPick.id
+      ? "✓ <b>"+esc(linkPick.name)+"</b> <span class='muted'>(policy #"+esc(linkPick.id)+")</span> <button type='button' class='btn-ghost' id='lmChange' style='margin-left:8px;padding:2px 8px;font-size:12px'>Change</button>"
+      : "✓ Will link by name: <b>"+esc(linkPick.name)+"</b> <span class='muted'>— the automation confirms it against Teramind on its next pass</span> <button type='button' class='btn-ghost' id='lmChange' style='margin-left:8px;padding:2px 8px;font-size:12px'>Change</button>";
+    $("lmChange").onclick=()=>{ linkPick=null; $("lmConfirm").disabled=true; renderLinkList(); $("lmSearch").focus(); };
+    return;
+  }
+  const picked=document.getElementById("lmPicked"); if(picked) picked.style.display="none";
+  if(!q){ list.className="pol-list"; list.innerHTML=""; return; }
+  const words=q.split(" ");
+  const used=new Set(rows.filter(r=>r.policyId&&!isNamedPolicy(r.policyId)).map(r=>String(r.policyId)));
+  const hits=DIR.policies.filter(p=>{ const n=normName(p.name); if(words.every(w=>n.indexOf(w)>=0)) return true; const s=policySummary(p); return words.every(w=>normName(s.who+" "+s.what).indexOf(w)>=0); })
+    .sort((a,b)=>(b.id||0)-(a.id||0)).slice(0,12);
+  let html=hits.map(p=>{ const s=policySummary(p); const arc=/^ARC-/.test(p.name||""); const inUse=used.has(String(p.id));
+    return `<div class="pol-item" data-pid="${esc(p.id)}" data-pname="${esc(p.name)}"><div class="pn">${esc(p.name)}${arc?' <span class="muted">(created by the dashboard)</span>':""}${inUse?' <span class="muted">(already linked to a request)</span>':""}</div><div class="pm">#${esc(p.id)}${s.who?" · for "+esc(s.who):""}${s.what?" · covers "+esc(s.what):""}</div></div>`; }).join("");
+  const typed=$("lmSearch").value.trim();
+  if(typed && !hits.some(p=>normName(p.name)===q)) html+=`<div class="pol-item asis" data-asis="1"><div class="pn">Use this name: “${esc(typed)}”</div><div class="pm">Not in the list yet (just created?) — stored by name; the automation looks it up in Teramind and fills in the id.</div></div>`;
+  list.innerHTML=html; list.className="pol-list"+(html?" open":"");
+}
+function wireLinkModal(){
+  $("lmSearch").addEventListener("input", renderLinkList);
+  $("lmList").addEventListener("click", (e)=>{
+    const it=e.target.closest(".pol-item"); if(!it) return;
+    if(it.hasAttribute("data-asis")) linkPick={ id:null, name:$("lmSearch").value.trim() };
+    else linkPick={ id:it.getAttribute("data-pid"), name:it.getAttribute("data-pname") };
+    $("lmConfirm").disabled=false; lmError(""); renderLinkList();
+  });
+  $("lmCancel").addEventListener("click", closeLinkModal);
+  $("linkModal").addEventListener("click", (e)=>{ if(e.target===$("linkModal")) closeLinkModal(); });
+  $("lmConfirm").addEventListener("click", confirmLink);
+}
+async function confirmLink(){
+  const rec=linkTarget, me=linkMe; if(!rec||!me||!linkPick) return;
+  const isDone=(rec.status||"").toLowerCase()==="done";
+  let days=NaN;
+  if(!isDone){ days=parseInt($("lmDays").value,10); if(isNaN(days)||days<1||days>365) return lmError("Access window must be between 1 and 365 days."); }
+  const pidVal = linkPick.id ? String(linkPick.id) : ("name:"+linkPick.name);
+  const label = linkPick.id ? ("#"+linkPick.id+" “"+linkPick.name+"”") : ("“"+linkPick.name+"”");
+  $("lmConfirm").disabled=true; $("lmConfirm").textContent="Linking…";
   try{
-    const stamp="Linked existing policy #"+pid+" by "+me.name+" "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
-    const f={ policyId:pid, notes: rec.notes ? (stamp+" | "+rec.notes) : stamp };
+    const stamp="Linked existing policy "+label+" by "+me.name+" "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
+    const f={ policyId:pidVal, notes: rec.notes ? (stamp+" | "+rec.notes).slice(0,255) : stamp };
     if(!rec.feature) f.feature=featuresForType(rec.type).join("; ");
     if(!isDone){ f.status="Done"; f.accessDays=days; if(!rec.owner) f.owner=me.name; f.approvedBy=me.name; f.approvedAt=new Date().toISOString(); }
     await withRetry(()=>saveTracking(rec, f));
-    render();
-    showBanner("Policy #"+pid+" linked — the automation will remove it when the window ends.","info");
+    closeLinkModal(); render();
+    showBanner("Policy "+label+" linked — the automation will remove it when the window ends"+(linkPick.id?"":" (it confirms the policy id on its next pass)")+".","info");
   }catch(err){
-    btn.textContent="Link policy…"; btn.disabled=false;
-    showBanner("Couldn't link the policy: "+err.message,"err");
+    $("lmConfirm").disabled=false; $("lmConfirm").textContent="Link policy";
+    lmError("Couldn't link the policy: "+((err&&err.message)||err));
   }
 }
 
