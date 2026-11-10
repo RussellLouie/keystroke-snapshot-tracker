@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · link-by-name build -->
+<!-- GoTeam Access Request Center · pinned-actions build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -73,13 +73,16 @@
   .banner.info{ background:#eff5ff; color:#1e50b0; border:1px solid #c7dbff; display:block; }
 
   /* ---------- STAT CARDS ---------- */
-  .stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:22px; }
-  .stat{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:15px 16px; display:flex; align-items:center; gap:13px;
+  .stats{ display:grid; grid-template-columns:repeat(9,minmax(0,1fr)); gap:10px; margin-bottom:16px; }
+  @media (max-width:1500px){ .stats{ grid-template-columns:repeat(5,minmax(0,1fr)); } }
+  @media (max-width:1100px){ .stats{ grid-template-columns:repeat(3,minmax(0,1fr)); } }
+  .stat{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; display:flex; align-items:center; gap:10px; min-width:0;
     box-shadow:0 1px 2px rgba(20,30,60,.04); }
-  .stat-dot{ width:38px; height:38px; border-radius:11px; flex:0 0 38px; display:flex; align-items:center; justify-content:center; }
-  .stat-dot svg{ width:19px; height:19px; }
-  .stat .n{ font-size:23px; font-weight:750; line-height:1; letter-spacing:-.5px; }
-  .stat .l{ color:var(--muted); font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; margin-top:4px; }
+  .stat-dot{ width:32px; height:32px; border-radius:9px; flex:0 0 32px; display:flex; align-items:center; justify-content:center; }
+  .stat-dot svg{ width:16px; height:16px; }
+  .stat .n{ font-size:20px; font-weight:750; line-height:1; letter-spacing:-.5px; }
+  .stat .l{ color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.03em; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .content{ padding:18px 28px 16px; }
   .s-total .stat-dot{ background:#e8f0ff; color:#1d6ff2; }
   .s-pending .stat-dot{ background:#fef3c7; color:#b7791f; }
   .s-progress .stat-dot{ background:#e0edff; color:#2563eb; }
@@ -103,14 +106,25 @@
   .toolbar select:focus{ outline:none; border-color:var(--brand); }
   .spacer{ flex:1; }
 
-  .tbl-scroll{ width:100%; overflow-x:auto; }
-  table{ width:100%; border-collapse:collapse; min-width:960px; }
+  /* The table scrolls inside its own box (height set by JS to fill the window) so the header stays at the
+     top and the Requester + action columns stay pinned left/right while you scroll in either direction. */
+  .tbl-scroll{ width:100%; overflow:auto; max-height:calc(100vh - 300px); min-height:280px; }
+  table{ width:100%; border-collapse:separate; border-spacing:0; min-width:960px; }
   thead th{ text-align:left; padding:11px 14px; background:#f7f9fc; border-bottom:1px solid var(--line);
-    font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; cursor:pointer; user-select:none; white-space:nowrap; }
+    font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; cursor:pointer; user-select:none; white-space:nowrap;
+    position:sticky; top:0; z-index:3; }
   thead th:hover{ color:var(--text); }
-  tbody td{ text-align:left; padding:12px 14px; border-bottom:1px solid var(--line2); vertical-align:middle; }
+  tbody td{ text-align:left; padding:12px 14px; border-bottom:1px solid var(--line2); vertical-align:middle; background:#fff; }
+  /* pinned columns */
+  thead th:last-child, tbody td:last-child{ position:sticky; right:0; z-index:2; box-shadow:-8px 0 10px -8px rgba(15,31,61,.25); }
+  thead th:last-child{ z-index:4; }
+  thead th:nth-child(2), tbody td:nth-child(2){ position:sticky; left:0; z-index:2; box-shadow:8px 0 10px -8px rgba(15,31,61,.18); font-weight:600; }
+  thead th:nth-child(2){ z-index:4; }
+  tbody tr:hover td{ background:#f9fbfe; }
+  td.ticket{ max-width:150px; font-size:12px; word-break:break-word; }
+  td.ticket .yes{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  td.ticket .yes.code{ font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:nowrap; -webkit-line-clamp:unset; }
   tbody tr:last-child td{ border-bottom:none; }
-  tbody tr:hover{ background:#f9fbfe; }
   td.content{ width:280px; min-width:240px; max-width:300px; color:#33405a; }
   td.content .clamp{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; line-height:1.5; word-break:break-word; }
   td.content .clamp.expanded{ -webkit-line-clamp:unset; overflow:visible; }
@@ -324,7 +338,7 @@
                 <th data-sort="status">Status</th>
                 <th data-sort="updatedAt">Last updated</th>
                 <th>Internal notes</th>
-                <th></th>
+                <th>Actions</th>
               </tr></thead>
               <tbody id="tbody"></tbody>
             </table>
@@ -1120,8 +1134,9 @@ function render(){
     tb.innerHTML=list.map(r=>{
       // A ticket ID is now mandatory on the form; the old Yes/No question is kept only for legacy rows.
       const hasTicket = !!(r.ticketId&&String(r.ticketId).trim()) || (r.ticketRaised||"").toString().toLowerCase().indexOf("yes")>=0;
+      const tid=String(r.ticketId||"").trim(); const looksLikeId=/^[A-Z]{2,6}-\d{3,}(-\d+)?$/i.test(tid);
       const ticket = hasTicket
-        ? `<span class="yes">${esc(r.ticketId||"Yes")}</span>` : `<span class="no" title="No ticket recorded">—</span>`;
+        ? `<span class="yes${looksLikeId?" code":""}" title="${esc(tid||"Yes")}">${esc(tid||"Yes")}</span>` : `<span class="no" title="No ticket recorded">—</span>`;
       const opts=["Pending","In progress","Approved","Done","Revoked"].map(o=>`<option${o===r.status?" selected":""}>${o}</option>`).join("");
       const ownerOpts=`<option value=""${r.owner?"":" selected"}>Unassigned</option>`+
         (CONFIG.owners||[]).map(o=>`<option${o===r.owner?" selected":""}>${esc(o)}</option>`).join("");
@@ -1158,7 +1173,7 @@ function render(){
         <td style="white-space:nowrap">${typePills(r.type)}</td>
         <td class="content">${r.content?`<div class="clamp" title="${esc(r.content)}">${esc(r.content)}</div>`:'<span class="muted">—</span>'}${scopeLine(r)}</td>
         <td>${r.priority?`<span class="pill ${prioClass(r.priority)}">${esc(r.priority)}</span>`:""}</td>
-        <td>${ticket}</td>
+        <td class="ticket">${ticket}</td>
         <td class="content">${r.reqNotes?`<div class="clamp" title="${esc(r.reqNotes)}">${esc(r.reqNotes)}</div>`:'<span class="muted">—</span>'}</td>
         <td>${accessCell}</td>
         <td class="policy-cell">${policyCell}</td>
@@ -1171,7 +1186,7 @@ function render(){
     }).join("");
   }
   $("foot").textContent=`${list.length} of ${rows.length} request${rows.length===1?"":"s"} shown`;
-  markClamps();
+  markClamps(); fitTable();
 }
 
 // Add a "Show more / Show less" toggle only to content cells whose text is actually clipped.
@@ -1191,7 +1206,16 @@ function markClamps(){
 /* ============================================================
    Events
    ============================================================ */
+// Size the table's scroll box so it ends at the bottom of the window: the page itself then never needs to
+// scroll, the header stays visible, and the pinned Requester / Actions columns are always on screen.
+function fitTable(){
+  const box=document.querySelector(".tbl-scroll"); if(!box) return;
+  const top=box.getBoundingClientRect().top; const foot=document.querySelector(".card .foot"); const footH=foot?foot.getBoundingClientRect().height:40;
+  const h=Math.max(280, window.innerHeight - top - footH - 28);
+  box.style.maxHeight=h+"px";
+}
 function wire(){
+  window.addEventListener("resize", fitTable); setTimeout(fitTable,0);
   $("search").oninput=$("fType").onchange=$("fStatus").onchange=$("fPriority").onchange=render;
   document.querySelectorAll("th[data-sort]").forEach(th=>{
     th.onclick=()=>{ const k=th.getAttribute("data-sort"); if(sortKey===k)sortDir*=-1; else {sortKey=k;sortDir=1;} render(); };
