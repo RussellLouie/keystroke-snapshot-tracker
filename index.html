@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · approve-gated build -->
+<!-- GoTeam Access Request Center · link-manual-policy build (10 Nov) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -406,7 +406,7 @@ const CONFIG = {
     { name:"Jhazer Andrade",     email:"jhazer.andrade@go.team" },
     { name:"Reylance Lacerna",   email:"reylance.lancerna@go.team" },
     { name:"Christian Esaga",    email:"christian.esaga@go.team" },
-    { name:"Rudy Maneja",        email:"rudy.maneja@go.team" },
+    { name:"Rudy Maneja",        email:"rudy.maneja@go.team",    approve:true },
     { name:"Diether Gingoyon",   email:"diether.gingoyon@go.team" },
     { name:"Jhayson Navaja",     email:"jhayson.navaja@go.team" },
     { name:"Bon Go",             email:"bon.go@go.team" },
@@ -1091,6 +1091,7 @@ function render(){
         ? `<div class="policy-id">policy #${esc(r.policyId)}${r.feature?" · "+esc(featureLabels(r.feature)):""}</div><span class="policy-name" title="Policy name in Teramind — click to copy" data-act="copy-policy">${esc(policyName(r))}</span>`
         : (stLow==="approved" ? '<span class="muted">Granting…</span>'
           : stLow==="done" ? `<button class="btn-link-policy" data-act="link-policy" title="This access was granted by hand in Teramind. Enter its policy ID so the automation revokes it when the window ends.">Link policy…</button>`
+          : (stLow==="pending"||stLow==="in progress") ? `<button class="btn-link-policy" data-act="link-policy" title="Granted by hand in Teramind? Enter the policy ID: the request is marked Done from today, the access window starts counting and the automation removes the policy when it ends.">Link manual policy…</button>`
           : '<span class="muted">—</span>');
       const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}${ro?' data-ro="1"':""}> Hold</label>` : "";
       const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
@@ -1375,7 +1376,7 @@ async function confirmGrant(){
   if(!features.length) return gmError("Tick at least one kind of access to grant.");
   if(features.indexOf("reports.keystrokes")>=0 && !ticket) return gmError("A ticket number is required for keystroke access.");
   const me=currentItStaff();
-  if(!me || !me.approve) return gmError("Only approvers (Russell, Clint, Olem, Paul John) can grant access (signed in as "+((account&&(account.username||account.name))||"unknown")+").");
+  if(!me || !me.approve) return gmError("Only approvers ("+APPROVERS_TEXT()+") can grant access (signed in as "+((account&&(account.username||account.name))||"unknown")+").");
   const who=me.name;
   const when=new Date().toISOString();
   $("gmConfirm").dataset.busy="1"; $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
@@ -1450,17 +1451,32 @@ async function onLinkPolicy(e){
   const rec=rows.find(x=>x.id===id); if(!rec) return;
   const me=currentItStaff();
   if(!me || !me.approve) return notApproverPrompt("link a Teramind policy");
+  const isDone=(rec.status||"").toLowerCase()==="done";
   const raw=prompt("Teramind Access Control policy ID for "+(rec.requester||id)+"\n\nFind it in Teramind → Manage → Access Control (the number in the policy's URL or list). Once linked, the automation deletes this policy when the access window ends, or when Revoke is clicked.");
   if(raw==null) return;
   const pid=String(raw).trim().replace(/^#/,"");
   if(!/^\d+$/.test(pid)) return showBanner("Policy ID must be a number.","err");
-  const ai=accessInfo(rec);
-  if(!confirm("Link policy #"+pid+" to this request?\n\nIt will be deleted automatically: "+ai.text+".")) return;
+  // Pending / In progress row: work out the window (row value → what the requester asked for → default) and mark Done from today.
+  let days=NaN;
+  if(!isDone){
+    let d=(rec.accessDays==null||String(rec.accessDays).trim()==="")?NaN:Number(rec.accessDays);
+    if(isNaN(d)||d<=0){ const m=String(rec.reqDays||"").match(/\d+/); if(m) d=parseInt(m[0],10); }
+    if(isNaN(d)||d<=0) d=CONFIG.accessDays;
+    const dr=prompt("Access window in days for "+(rec.requester||id)+" (counts from today):", String(d));
+    if(dr==null) return;
+    days=parseInt(String(dr).trim(),10);
+    if(isNaN(days)||days<1||days>365) return showBanner("Access window must be between 1 and 365 days.","err");
+  }
+  const msg = isDone
+    ? "Link policy #"+pid+" to this request?\n\nIt will be deleted automatically: "+accessInfo(rec).text+"."
+    : "Link policy #"+pid+" to this request?\n\nThe request is marked Done today"+(rec.owner?"":" with you as owner")+", the window is "+days+" day"+(days===1?"":"s")+", and the automation deletes the policy when it ends (or when Revoke is clicked).";
+  if(!confirm(msg)) return;
   btn.textContent="Linking…"; btn.disabled=true;
   try{
     const stamp="Linked existing policy #"+pid+" by "+me.name+" "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
     const f={ policyId:pid, notes: rec.notes ? (stamp+" | "+rec.notes) : stamp };
     if(!rec.feature) f.feature=featuresForType(rec.type).join("; ");
+    if(!isDone){ f.status="Done"; f.accessDays=days; if(!rec.owner) f.owner=me.name; f.approvedBy=me.name; f.approvedAt=new Date().toISOString(); }
     await withRetry(()=>saveTracking(rec, f));
     render();
     showBanner("Policy #"+pid+" linked — the automation will remove it when the window ends.","info");
@@ -1573,7 +1589,7 @@ async function loadData(){
   render();
   $("loading").style.display="none"; $("tbl").style.display="table";
   if(!trackOk) showBanner("Requests are shown without their statuses because the workbook is open for editing elsewhere — click Reload in a moment.","info");
-  else if(!canEdit()) showBanner("View only — your account can see requests but not grant, revoke or edit them. Approvers: Russell, Clint, Olem and Paul John.","info");
+  else if(!canEdit()) showBanner("View only — your account can see requests but not grant, revoke or edit them. Approvers: "+APPROVERS_TEXT()+".","info");
   pDir.then(()=>{ buildRows(lastValues); render(); });   // ✓/✗ indicators + picker once the directory lands
 }
 // readTracking() swallows errors; this variant throws so loadData can tell "missing table" from "empty".
