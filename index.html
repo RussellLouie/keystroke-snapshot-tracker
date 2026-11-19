@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · manual-request build -->
+<!-- GoTeam Access Request Center · safe-cleanup build (19 Nov 2026) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -728,9 +728,9 @@ async function getToken(){
 }
 async function graph(path, opts){
   const token = await getToken();
-  const res = await fetch(GRAPH + path, Object.assign({
+  const res = await fetch(GRAPH + path, Object.assign({}, opts||{}, {
     headers: Object.assign({ "Authorization":"Bearer "+token, "Content-Type":"application/json" }, (opts&&opts.headers)||{})
-  }, opts||{}));
+  }));
   if(!res.ok){ const t = await res.text(); throw new Error("Graph "+res.status+" at "+path.split("?")[0]+": "+t); }
   const ct = res.headers.get("content-type")||"";
   return ct.indexOf("application/json")>=0 ? res.json() : res.text();
@@ -988,7 +988,14 @@ async function saveManualRequest(){
 /* ---- Remove duplicate Tracking rows (one request must have exactly one row) ---- */
 async function cleanDuplicateRows(btn){
   const me=currentItStaff(); if(!me||!me.approve) return notApproverPrompt("clean up the tracking sheet");
-  const read=async()=>((await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows?$select=index,values")).value||[]);
+  // One workbook session for the whole clean-up. Without it Excel can answer a read from a copy that has not seen
+  // the previous delete yet; rows are addressed by position, so a stale answer made a later delete hit the wrong row
+  // (19 Nov: a request's only row was removed that way). Inside a session every read reflects the deletes before it.
+  let sid="";
+  try{ sid=(await graph(itemBase()+"/workbook/createSession",{method:"POST",body:JSON.stringify({persistChanges:true})})).id||""; }catch(e){}
+  if(!sid) return showBanner("Couldn't open an Excel session for a safe clean-up - nothing was changed. Try again in a minute.","warn");
+  const H={ "workbook-session-id": sid };
+  const read=async()=>((await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows?$select=index,values",{headers:H})).value||[]);
   let all=await read();
   const groups={}; all.forEach(x=>{ const k=(x.values[0][0]||"")+""; if(k) (groups[k]=groups[k]||[]).push(x); });
   const score=x=>{ const v=x.values[0]; return (cell(v,TC.policyId)?2:0)+(v[6]?1:0); };
@@ -1010,11 +1017,15 @@ async function cleanDuplicateRows(btn){
       const now=await read();
       const row=now.find(x=>x.index===k.index); const same=now.filter(x=>((x.values[0][0]||"")+"")===k.id);
       if(!row || ((row.values[0][0]||"")+"")!==k.id || same.length<2){ skipped++; continue; }
-      await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+k.index+")",{method:"DELETE"});
+      // the row must also be an exact copy of the row that stays (same status + policy), otherwise leave it alone
+      const keep=same.find(x=>x.index!==k.index);
+      if(!keep || String(keep.values[0][1])!==String(row.values[0][1]) || String(cell(keep.values[0],TC.policyId))!==String(cell(row.values[0],TC.policyId))){ skipped++; continue; }
+      await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+k.index+")",{method:"DELETE",headers:H});
       done++;
-      await new Promise(r=>setTimeout(r,700));
-    }catch(e){ skipped++; }
+    }catch(e){ skipped++; break; }      // never continue on an error: positions may no longer be what we think
   }
+  try{ await graph(itemBase()+"/workbook/closeSession",{method:"POST",headers:H}); }catch(e){}
+  await new Promise(r=>setTimeout(r,2500));
   if(btn) btn.textContent=old;
   await withRetry(()=>readTracking()); buildRows(lastValues); render(); updateDupeBtn();
   showBanner("Removed "+done+" duplicate row"+(done===1?"":"s")+(skipped?" ("+skipped+" skipped - click again in a minute)":"")+". Saves and approvals are fast again.","info");
@@ -1907,7 +1918,8 @@ async function loadData(){
 async function healStuckGrants(){
   if(!canEdit()) return;
   const stuck=rows.filter(r=>(r.status||"").toLowerCase()==="approved" && r.approvedAt && (Date.now()-new Date(r.approvedAt).getTime())>90000);
-  if(!stuck.length) return;
+  const maybeLost=rows.some(r=>!r.policyId && /^(pending|in progress|)$/i.test(r.status||""));
+  if(!stuck.length && !maybeLost) return;
   let q;
   try{ q=(await graph(itemBase()+"/workbook/tables/"+GRANT_TABLE+"/dataBodyRange?$select=values")).values||[]; }catch(e){ return; }
   let fixed=0;
@@ -1926,6 +1938,25 @@ async function healStuckGrants(){
         await withRetry(()=>saveTracking(rec, { status:"In progress", notes:(note+(rec.notes?" | "+rec.notes:"")).slice(0,255), _edit:true })); fixed++;
       }
     }catch(e){ /* try again on the next load */ }
+  }
+  // Lost record: the row says Pending / In progress with no policy, but the automation's log shows a finished grant
+  // for it AND that policy still exists in Teramind under this request's name. Restore the row from the log.
+  if(DIR.loaded && DIR.policies.length){
+    const used=new Set(rows.filter(r=>r.policyId).map(r=>String(r.policyId)));
+    for(const rec of rows){
+      const st=(rec.status||"").toLowerCase();
+      if(rec.policyId || !(st==="pending"||st==="in progress"||st==="")) continue;
+      const jobs=q.filter(x=>String(x[1])===String(rec.id) && String(x[10]||"").toLowerCase()==="done" && String(x[11]||"").trim());
+      const job=jobs[jobs.length-1]; if(!job) continue;
+      const pid=String(job[11]).trim(); const pol=DIR.policyById[pid];
+      if(!pol || used.has(pid) || String(pol.name||"").indexOf("ARC-"+rec.id+" |")!==0) continue;     // policy gone (revoked) or not ours
+      try{
+        const note="Record restored from the automation log (policy #"+pid+")";
+        await withRetry(()=>saveTracking(rec, { status:"Done", policyId:pid, doneAt:String(jobs[0][13]||job[13]||new Date().toISOString()), accessDays:job[6], subjects:String(job[5]||""),
+          approvedBy:String(job[8]||""), approvedAt:String(job[9]||""), feature:String(job[4]||""), owner:rec.owner||String(job[8]||""), notes:(note+(rec.notes?" | "+rec.notes:"")).slice(0,255) }));
+        used.add(pid); fixed++;
+      }catch(e){}
+    }
   }
   if(fixed){ render(); }
 }
