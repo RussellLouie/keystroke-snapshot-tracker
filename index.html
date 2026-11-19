@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · no-duplicate-rows build (19 Nov) -->
+<!-- GoTeam Access Request Center · manual-request build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -327,6 +327,7 @@
             <select id="fStatus"><option value="">All statuses</option><option>Pending</option><option>In progress</option><option>Approved</option><option>Done</option><option>Revoked</option></select>
             <select id="fPriority"><option value="">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select>
             <div class="spacer"></div>
+            <button class="btn-ghost" id="manualBtn" style="display:none" title="Record a request that reached IT outside the form (Teams, email, verbal) so it can be approved, tracked and auto-revoked like any other">＋ Manual request</button>
             <button class="btn-ghost" id="dedupeBtn" style="display:none;border-color:#f0b429;color:#92600e;background:#fffbeb" title="The Tracking sheet has more than one row for some requests, which makes every save slow. Click to keep one row per request.">🧹 Clean duplicates</button>
             <button class="btn-ghost" id="exportBtn">Export CSV</button>
           </div>
@@ -422,6 +423,43 @@
       <div class="m-foot">
         <button class="btn-ghost" id="lmCancel">Cancel</button>
         <button class="btn-approve" id="lmConfirm" disabled>Link policy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual request: a request that reached IT outside the Microsoft Form -->
+  <div class="modal-bg" id="manualModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mmTitle">
+      <h2 id="mmTitle">New manual request</h2>
+      <div class="m-body">
+        <div class="hint" style="margin-top:-4px">For a request that reached IT outside the form (Teams, email, verbal). It is added to the list as a normal request with you as owner — you then review and click <b>Approve &amp; grant</b> as usual. No email is sent at this step.</div>
+        <div class="m-row">
+          <div><label>Requester name</label><input type="text" id="mmName" placeholder="e.g. Carlos Enriquez" autocomplete="off"></div>
+          <div><label>Requester email (Teramind login that gets the access)</label><input type="text" id="mmEmail" placeholder="name@go.team" autocomplete="off"><div class="hint" id="mmEmailHint"></div></div>
+        </div>
+        <div class="m-row">
+          <div><label>Access requested</label>
+            <div id="mmType" class="feat-list">
+              <label class="feat"><input type="checkbox" value="Snapshot"> Snapshot</label>
+              <label class="feat"><input type="checkbox" value="Keystroke"> Keystroke</label>
+              <label class="feat"><input type="checkbox" value="Video Playback"> Video playback <span class="hint">includes Snapshot</span></label>
+            </div></div>
+          <div><label>Access window (days)</label><input type="number" id="mmDays" min="1" max="365" step="1" value="7">
+            <label style="margin-top:10px">Priority</label><select id="mmPrio"><option>High</option><option selected>Medium</option><option>Low</option></select></div>
+        </div>
+        <div><label>Who they need to view</label>
+          <textarea id="mmScope" placeholder="One per line: team-member email, name, or department / client name as in Teramind"></textarea>
+          <div class="hint" id="mmScopeHint">Checked against Teramind when you approve; anything not found is flagged there for correction.</div></div>
+        <div><label>Reason</label><input type="text" id="mmReason" placeholder="What it is for, e.g. Teramind audit of the Simplerent team"></div>
+        <div class="m-row">
+          <div><label>Ticket ID <span style="font-weight:400">(if there is one)</span></label><input type="text" id="mmTicket" placeholder="ISUP-…" autocomplete="off"></div>
+          <div><label>Where it came from / who approved</label><input type="text" id="mmSource" placeholder="e.g. Teams chat with Olem 19 Nov; approved by Romel Reston"></div>
+        </div>
+        <div class="m-err" id="mmErr"></div>
+      </div>
+      <div class="m-foot">
+        <button class="btn-ghost" id="mmCancel">Cancel</button>
+        <button class="btn-approve" id="mmSave">Add request</button>
       </div>
     </div>
   </div>
@@ -887,6 +925,66 @@ const __addedMem={};
 function markAdded(id){ __addedMem[id]=Date.now(); try{ const m=addedMap(); m[id]=Date.now(); localStorage.setItem(ADDED_KEY, JSON.stringify(m)); }catch(e){} }
 function recentlyAdded(id){ const t=__addedMem[id]||addedMap()[id]; return !!t && (Date.now()-t)<ADDED_TTL; }
 
+/* ---- Manual request: write a row into the responses table exactly like the form flow does ---- */
+function mmError(m){ const e=$("mmErr"); e.textContent=m||""; e.style.display=m?"block":"none"; }
+function mmCheckEmail(){
+  const v=$("mmEmail").value.trim().toLowerCase(), h=$("mmEmailHint");
+  if(!v || !DIR.loaded){ h.textContent=""; return; }
+  const a=DIR.byEmail[v];
+  h.innerHTML = a ? '<span style="color:#1a7f4b">✓ In Teramind: '+esc(a.name)+'</span>' : '<span style="color:#b42318">✗ Not a Teramind login — access can only be granted to an existing Teramind account</span>';
+  if(a && !$("mmName").value.trim()) $("mmName").value=a.name;
+}
+function openManualModal(){
+  const me=currentItStaff(); if(!me||!me.approve) return notApproverPrompt("add a manual request");
+  ["mmName","mmEmail","mmScope","mmReason","mmTicket","mmSource"].forEach(i=>$(i).value="");
+  $("mmDays").value=CONFIG.accessDays||7; $("mmPrio").value="Medium"; $("mmEmailHint").textContent="";
+  $("mmType").querySelectorAll("input").forEach(c=>c.checked=false);
+  mmError(""); $("mmSave").disabled=false; $("mmSave").textContent="Add request";
+  $("manualModal").classList.add("open"); setTimeout(()=>$("mmName").focus(),50);
+}
+function closeManualModal(){ $("manualModal").classList.remove("open"); }
+async function saveManualRequest(){
+  const me=currentItStaff(); if(!me||!me.approve) return notApproverPrompt("add a manual request");
+  const name=$("mmName").value.trim(), email=$("mmEmail").value.trim().toLowerCase();
+  const types=[...$("mmType").querySelectorAll("input:checked")].map(c=>c.value);
+  if(types.indexOf("Video Playback")>=0 && types.indexOf("Snapshot")<0) types.unshift("Snapshot");
+  const scope=$("mmScope").value.split(/[\n;]+/).map(x=>x.trim()).filter(Boolean);
+  const days=parseInt($("mmDays").value,10), reason=$("mmReason").value.trim(), ticket=$("mmTicket").value.trim(), source=$("mmSource").value.trim();
+  if(!name) return mmError("Enter the requester's name.");
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return mmError("Enter the requester's email (the Teramind login that should receive the access).");
+  if(!types.length) return mmError("Tick at least one kind of access.");
+  if(!scope.length) return mmError("List who they need to view (one per line).");
+  if(isNaN(days)||days<1||days>365) return mmError("Access window must be between 1 and 365 days.");
+  if(!reason) return mmError("Enter the reason for the request.");
+  if(!source) return mmError("Say where the request came from / who approved it — this is the audit trail that replaces the form.");
+  if(types.indexOf("Keystroke")>=0 && !ticket) return mmError("A ticket ID is required for keystroke access.");
+  $("mmSave").disabled=true; $("mmSave").textContent="Adding…"; mmError("");
+  try{
+    if(!DRIVE_ID) await resolveWorkbook();
+    const hdr=(await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/headerRowRange?$select=values")).values[0];
+    const m=mapHeaders(hdr);
+    if(m.id<0 || m.requester<0) throw new Error("The responses table has no Id / name column — cannot add a row.");
+    const d=new Date(), p2=n=>String(n).padStart(2,"0");
+    const id="M"+String(d.getFullYear()).slice(2)+p2(d.getMonth()+1)+p2(d.getDate())+"-"+p2(d.getHours())+p2(d.getMinutes())+p2(d.getSeconds());
+    const row=hdr.map(()=> "");
+    const put=(k,v)=>{ if(m[k]>=0) row[m[k]]=v; };
+    put("id",id); put("submitted",d.toISOString()); put("requester",name); put("type",types.join("; ")); put("content",reason);
+    put("priority",$("mmPrio").value); put("reqNotes","Manual entry by "+me.name+" — "+source); put("ticketRaised",ticket?"Yes":"No"); put("ticketId",ticket);
+    put("email",email); put("scope",scope.join("; ")); put("reqDays",days+" days");
+    await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/rows/add",{method:"POST",body:JSON.stringify({values:[row]})});
+    // show it straight away (Excel may take a few seconds to return the new row on a re-read)
+    if(lastValues && lastValues.length){ const local=lastValues[0].map(()=> ""); const lm=mapHeaders(lastValues[0]); Object.keys(m).forEach(k=>{ if(m[k]>=0 && lm[k]>=0) local[lm[k]]=row[m[k]]; }); lastValues.push(local); }
+    buildRows(lastValues);
+    const rec=rows.find(x=>String(x.id)===id);
+    if(rec){ try{ await withRetry(()=>saveTracking(rec,{ owner:me.name, accessDays:days, notes:("Manual request ("+source+")").slice(0,200) })); }catch(e){} }
+    closeManualModal(); sortKey="submitted"; sortDir=-1; render();
+    showBanner("Manual request "+id+" added for "+name+" with you as owner. Review it and click Approve & grant.","info");
+  }catch(err){
+    $("mmSave").disabled=false; $("mmSave").textContent="Add request";
+    mmError("Couldn't add the request: "+((err&&err.message)||err));
+  }
+}
+
 /* ---- Remove duplicate Tracking rows (one request must have exactly one row) ---- */
 async function cleanDuplicateRows(btn){
   const me=currentItStaff(); if(!me||!me.approve) return notApproverPrompt("clean up the tracking sheet");
@@ -921,7 +1019,7 @@ async function cleanDuplicateRows(btn){
   await withRetry(()=>readTracking()); buildRows(lastValues); render(); updateDupeBtn();
   showBanner("Removed "+done+" duplicate row"+(done===1?"":"s")+(skipped?" ("+skipped+" skipped - click again in a minute)":"")+". Saves and approvals are fast again.","info");
 }
-function updateDupeBtn(){ const b=$("dedupeBtn"); if(!b) return; b.style.display=(TRACK_DUPES>0 && canEdit())?"":"none"; b.textContent="🧹 Clean "+TRACK_DUPES+" duplicate row"+(TRACK_DUPES===1?"":"s"); }
+function updateDupeBtn(){ const mb=$("manualBtn"); if(mb) mb.style.display=canEdit()?"":"none"; const b=$("dedupeBtn"); if(!b) return; b.style.display=(TRACK_DUPES>0 && canEdit())?"":"none"; b.textContent="🧹 Clean "+TRACK_DUPES+" duplicate row"+(TRACK_DUPES===1?"":"s"); }
 // Column order of the Tracking table (see TC above).
 const TRACK_FIELDS=["id","status","notes","owner","updatedBy","updatedAt","doneAt","requester","content","accessDays","submitted","submitMinLocal","policyId","hold","subjects","approvedBy","approvedAt","feature"];
 function rowToRec(v){ const o={}; TRACK_FIELDS.forEach((k,i)=>{ o[k]=(v&&v[i]!=null)?v[i]:""; }); return o; }
@@ -1309,6 +1407,9 @@ function wire(){
   $("gmFeature").addEventListener("change", ()=>{ enforceFeatureRules(); updateTicketHint(); });
   wirePicker();
   wireLinkModal();
+  $("manualBtn").onclick=openManualModal; $("mmCancel").onclick=closeManualModal; $("mmSave").onclick=()=>saveManualRequest();
+  $("mmEmail").addEventListener("input", mmCheckEmail);
+  $("manualModal").addEventListener("click",(e)=>{ if(e.target===$("manualModal")) closeManualModal(); });
   $("dedupeBtn").onclick=function(){ cleanDuplicateRows(this).catch(e=>showBanner("Clean-up failed: "+((e&&e.message)||e),"err")); };
   $("gmEmail").addEventListener("input", checkEmailField);
   $("grantModal").addEventListener("click",(e)=>{ if(e.target===$("grantModal")) closeGrantModal(); });
