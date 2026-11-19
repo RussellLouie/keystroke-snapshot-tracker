@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · owner-first build -->
+<!-- GoTeam Access Request Center · grant-race-fix build -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -1467,12 +1467,22 @@ async function confirmGrant(){
   try{
     if(!DRIVE_ID) await resolveWorkbook();
     const editPid = grantEdit ? String(rec.policyId||"") : "";
-    await queueGrant({ responseId:rec.id, requesterName:rec.requester||"", requesterEmail:email, feature, subjects:subjects.join("; "), accessDays:days, ticket, approvedBy:who, approvedAt:when, policyId:editPid });
+    // ORDER MATTERS: write "Approved" to the tracking sheet FIRST and only then queue the grant. The worker picks a
+    // queued row up within seconds; if the (slower) tracking save landed after the worker had already written Done,
+    // it overwrote Done with Approved and the row sat on "Granting…/Updating…" forever.
+    const prev={ status:rec.status, approvedBy:rec.approvedBy||"", approvedAt:rec.approvedAt||"" };
     const f={ status:"Approved", accessDays:days, subjects:subjects.join("; "), approvedBy:who, approvedAt:when, feature, policyId:editPid, _edit:grantEdit };
     if(!grantEdit) f.doneAt="";            // an edit keeps the original grant date, so the countdown continues
     if(ticket && !rec.ticketId) f.notes=(rec.notes?rec.notes+" | ":"")+"Ticket "+ticket;
     if(grantEdit) f.notes=("Grant edited by "+who+" "+new Date().toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"})+(f.notes?" | "+f.notes:(rec.notes?" | "+rec.notes:"")));
     await withRetry(()=>saveTracking(rec, f));
+    try{
+      await queueGrant({ responseId:rec.id, requesterName:rec.requester||"", requesterEmail:email, feature, subjects:subjects.join("; "), accessDays:days, ticket, approvedBy:who, approvedAt:when, policyId:editPid });
+    }catch(qerr){
+      // nothing was queued: put the row back so it does not sit on "Granting…" with no job behind it
+      try{ await withRetry(()=>saveTracking(rec, { status:prev.status||"Pending", approvedBy:prev.approvedBy, approvedAt:prev.approvedAt, _edit:true })); }catch(e){}
+      render(); throw qerr;
+    }
     closeGrantModal(); render();
     showBanner(grantEdit
       ? "Changes queued — policy #"+editPid+" will be updated by the automation within a few seconds; the row returns to Done when finished."
@@ -1734,7 +1744,34 @@ async function loadData(){
   $("loading").style.display="none"; $("tbl").style.display="table";
   if(!trackOk) showBanner("Requests are shown without their statuses because the workbook is open for editing elsewhere — click Reload in a moment.","info");
   else if(!canEdit()) showBanner("View only — your account can see requests but not grant, revoke or edit them. Approvers: "+APPROVERS_TEXT()+".","info");
-  pDir.then(()=>{ buildRows(lastValues); render(); });   // ✓/✗ indicators + picker once the directory lands
+  pDir.then(()=>{ buildRows(lastValues); render(); }).then(()=>{ if(trackOk) healStuckGrants().catch(()=>{}); });   // ✓/✗ indicators + picker once the directory lands; then repair rows stuck on Granting…
+}
+// Self-heal: a row still "Approved" (Granting…/Updating…) minutes after approval, while the worker's queue row for
+// that very approval is already Done/Error, was overwritten by a late dashboard save. Put the real outcome back.
+async function healStuckGrants(){
+  if(!canEdit()) return;
+  const stuck=rows.filter(r=>(r.status||"").toLowerCase()==="approved" && r.approvedAt && (Date.now()-new Date(r.approvedAt).getTime())>90000);
+  if(!stuck.length) return;
+  let q;
+  try{ q=(await graph(itemBase()+"/workbook/tables/"+GRANT_TABLE+"/dataBodyRange?$select=values")).values||[]; }catch(e){ return; }
+  let fixed=0;
+  for(const rec of stuck){
+    // GrantQueue: Id0 ResponseID1 Name2 Email3 Feature4 Subjects5 Days6 Ticket7 ApprovedBy8 ApprovedAt9 Status10 PolicyId11 Message12 ProcessedAt13
+    const mine=q.filter(x=>String(x[1])===String(rec.id) && String(x[9])===String(rec.approvedAt));
+    const job=mine[mine.length-1]; if(!job) continue;
+    const st=String(job[10]||"").toLowerCase();
+    try{
+      if(st==="done" && String(job[11]||"").trim()){
+        const f={ status:"Done", policyId:String(job[11]).trim() };
+        if(!rec.doneAt) f.doneAt=String(job[13]||new Date().toISOString());
+        await withRetry(()=>saveTracking(rec, f)); fixed++;
+      }else if(st==="error"){
+        const note="Grant failed: "+String(job[12]||"see automation log").slice(0,150);
+        await withRetry(()=>saveTracking(rec, { status:"In progress", notes:(note+(rec.notes?" | "+rec.notes:"")).slice(0,255), _edit:true })); fixed++;
+      }
+    }catch(e){ /* try again on the next load */ }
+  }
+  if(fixed){ render(); }
 }
 // readTracking() swallows errors; this variant throws so loadData can tell "missing table" from "empty".
 async function readTrackingStrict(){
