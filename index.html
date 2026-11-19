@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · grant-race-fix build -->
+<!-- GoTeam Access Request Center · no-duplicate-rows build (19 Nov) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -327,6 +327,7 @@
             <select id="fStatus"><option value="">All statuses</option><option>Pending</option><option>In progress</option><option>Approved</option><option>Done</option><option>Revoked</option></select>
             <select id="fPriority"><option value="">All priorities</option><option>High</option><option>Medium</option><option>Low</option></select>
             <div class="spacer"></div>
+            <button class="btn-ghost" id="dedupeBtn" style="display:none;border-color:#f0b429;color:#92600e;background:#fffbeb" title="The Tracking sheet has more than one row for some requests, which makes every save slow. Click to keep one row per request.">🧹 Clean duplicates</button>
             <button class="btn-ghost" id="exportBtn">Export CSV</button>
           </div>
           <div id="loading">Loading requests…</div>
@@ -846,7 +847,9 @@ async function queueGrant(q){
   return id;
 }
 
+let TRACK_DUPES=0;   // extra Tracking rows (same request id more than once) seen at the last read
 function parseTrackingRows(values){
+  { const seen={}; let d=0; (values||[]).forEach(r=>{ const k=(r[0]||"").toString(); if(!k) return; if(seen[k]) d++; seen[k]=1; }); TRACK_DUPES=d; }
   (values||[]).forEach((row,i)=>{
     const id=(row[0]||"").toString();
     if(!id) return;
@@ -877,6 +880,48 @@ async function saveTracking(rec, fields){
   try { return await saveTrackingInner(rec, fields); }
   finally { delete __saveLocks[_id]; _rel(); }
 }
+// "This browser added a Tracking row for request X at time T" - shared by all tabs through localStorage.
+const ADDED_KEY="arc.trackAdded.v1", ADDED_TTL=3*60*1000;
+function addedMap(){ try{ const m=JSON.parse(localStorage.getItem(ADDED_KEY)||"{}"); const now=Date.now(); Object.keys(m).forEach(k=>{ if(now-m[k]>ADDED_TTL) delete m[k]; }); return m; }catch(e){ return {}; } }
+const __addedMem={};
+function markAdded(id){ __addedMem[id]=Date.now(); try{ const m=addedMap(); m[id]=Date.now(); localStorage.setItem(ADDED_KEY, JSON.stringify(m)); }catch(e){} }
+function recentlyAdded(id){ const t=__addedMem[id]||addedMap()[id]; return !!t && (Date.now()-t)<ADDED_TTL; }
+
+/* ---- Remove duplicate Tracking rows (one request must have exactly one row) ---- */
+async function cleanDuplicateRows(btn){
+  const me=currentItStaff(); if(!me||!me.approve) return notApproverPrompt("clean up the tracking sheet");
+  const read=async()=>((await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows?$select=index,values")).value||[]);
+  let all=await read();
+  const groups={}; all.forEach(x=>{ const k=(x.values[0][0]||"")+""; if(k) (groups[k]=groups[k]||[]).push(x); });
+  const score=x=>{ const v=x.values[0]; return (cell(v,TC.policyId)?2:0)+(v[6]?1:0); };
+  const kill=[];   // {index,id}
+  Object.keys(groups).forEach(k=>{ const g=groups[k]; if(g.length<2) return;
+    g.sort((a,b)=>(score(b)-score(a)) || String(b.values[0][5]||"").localeCompare(String(a.values[0][5]||"")) || (a.index-b.index));
+    g.slice(1).forEach(x=>kill.push({index:x.index,id:k})); });
+  if(!kill.length){ TRACK_DUPES=0; updateDupeBtn(); return showBanner("No duplicate rows - the tracking sheet is clean.","info"); }
+  // Don't shuffle row positions while the automation may be about to write (it addresses rows by position).
+  const busy=all.some(x=>{ const v=x.values[0]; const st=String(v[1]||"").toLowerCase(); return st==="approved" || (st==="revoked" && cell(v,TC.policyId)); });
+  if(busy) return showBanner("A grant or revoke is in progress right now - wait until no row shows Granting/Updating/Revoking, then clean up.","warn");
+  if(!confirm("Remove "+kill.length+" duplicate row"+(kill.length===1?"":"s")+" from the Tracking sheet?\n\nEach request keeps one row (the one with the policy / most recent update). Statuses, notes and policies are not changed. Do this while nobody else is approving.")) return;
+  const old=btn?btn.textContent:""; let done=0, skipped=0;
+  kill.sort((a,b)=>b.index-a.index);          // bottom-up, so the positions of the rows still to delete don't move
+  for(const k of kill){
+    if(btn) btn.textContent="Cleaning "+(done+skipped+1)+"/"+kill.length+"…";
+    try{
+      // verify right before deleting: the row at this position must still belong to that request AND another row for it must remain
+      const now=await read();
+      const row=now.find(x=>x.index===k.index); const same=now.filter(x=>((x.values[0][0]||"")+"")===k.id);
+      if(!row || ((row.values[0][0]||"")+"")!==k.id || same.length<2){ skipped++; continue; }
+      await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/itemAt(index="+k.index+")",{method:"DELETE"});
+      done++;
+      await new Promise(r=>setTimeout(r,700));
+    }catch(e){ skipped++; }
+  }
+  if(btn) btn.textContent=old;
+  await withRetry(()=>readTracking()); buildRows(lastValues); render(); updateDupeBtn();
+  showBanner("Removed "+done+" duplicate row"+(done===1?"":"s")+(skipped?" ("+skipped+" skipped - click again in a minute)":"")+". Saves and approvals are fast again.","info");
+}
+function updateDupeBtn(){ const b=$("dedupeBtn"); if(!b) return; b.style.display=(TRACK_DUPES>0 && canEdit())?"":"none"; b.textContent="🧹 Clean "+TRACK_DUPES+" duplicate row"+(TRACK_DUPES===1?"":"s"); }
 // Column order of the Tracking table (see TC above).
 const TRACK_FIELDS=["id","status","notes","owner","updatedBy","updatedAt","doneAt","requester","content","accessDays","submitted","submitMinLocal","policyId","hold","subjects","approvedBy","approvedAt","feature"];
 function rowToRec(v){ const o={}; TRACK_FIELDS.forEach((k,i)=>{ o[k]=(v&&v[i]!=null)?v[i]:""; }); return o; }
@@ -892,8 +937,15 @@ async function saveTrackingInner(rec, fields){
   const when = new Date().toISOString();
   fields = fields || {};
   // 1) Current truth from the sheet
-  const rr = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows?$select=index,values");
-  const mine=(rr.value||[]).filter(x=>((x.values&&x.values[0]&&x.values[0][0])+"")===(id+""));
+  const findMine = async()=>{ const rr = await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows?$select=index,values");
+    return (rr.value||[]).filter(x=>((x.values&&x.values[0]&&x.values[0][0])+"")===(id+"")); };
+  let mine = await findMine();
+  // Excel's API can keep returning the OLD table for a few seconds after a row was added. Saving again in that
+  // window (owner, then days, then approve...) used to add another row each time - the source of the duplicate
+  // rows. If this browser added the row recently, wait for it to become visible instead of adding again.
+  if(!mine.length && recentlyAdded(id)){
+    for(let i=0;i<8 && !mine.length;i++){ await new Promise(r=>setTimeout(r,1500)); mine = await findMine(); }
+  }
   // canonical row = the one the automation stamped (PolicyId / DoneAt), else the most recently updated
   const score=x=>{ const v=x.values[0]; return (cell(v,TC.policyId)?2:0)+(v[6]?1:0); };
   mine.sort((a,b)=> (score(b)-score(a)) || String(b.values[0][5]||"").localeCompare(String(a.values[0][5]||"")));
@@ -928,7 +980,9 @@ async function saveTrackingInner(rec, fields){
     }
     tracking[id]=Object.assign({ rowIndex:mine[0].index }, snap);
   } else {
+    markAdded(id);     // before the call: a timed-out add may still have been applied
     await graph(itemBase()+"/workbook/tables/"+CONFIG.trackingTable+"/rows/add",{method:"POST",body:JSON.stringify({values:vals})});
+    markAdded(id);
     tracking[id]=Object.assign({ rowIndex:-1 }, snap);     // real index is looked up fresh on the next save
   }
   // Reflect the merged truth in the visible row (a stale page learns the real status here)
@@ -1196,7 +1250,7 @@ function render(){
     }).join("");
   }
   $("foot").textContent=`${list.length} of ${rows.length} request${rows.length===1?"":"s"} shown`;
-  markClamps(); fitTable();
+  markClamps(); fitTable(); try{ updateDupeBtn(); }catch(e){}
 }
 
 // Add a "Show more / Show less" toggle only to content cells whose text is actually clipped.
@@ -1255,6 +1309,7 @@ function wire(){
   $("gmFeature").addEventListener("change", ()=>{ enforceFeatureRules(); updateTicketHint(); });
   wirePicker();
   wireLinkModal();
+  $("dedupeBtn").onclick=function(){ cleanDuplicateRows(this).catch(e=>showBanner("Clean-up failed: "+((e&&e.message)||e),"err")); };
   $("gmEmail").addEventListener("input", checkEmailField);
   $("grantModal").addEventListener("click",(e)=>{ if(e.target===$("grantModal")) closeGrantModal(); });
   document.addEventListener("keydown",(e)=>{ if(e.key==="Escape" && $("grantModal").classList.contains("open")) closeGrantModal(); });
