@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · safe-cleanup build (19 Nov 2026) -->
+<!-- GoTeam Access Request Center · live-countdown build (20 Nov) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -144,6 +144,18 @@
   .exp{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
   .exp-ok{ background:#eef1f6; color:#516079; } .exp-warn{ background:#fef3c7; color:#92600e; } .exp-over{ background:#fee2e2; color:#b42318; }
   .exp-await{ background:#e8f0ff; color:#2f5bb0; }
+  /* live countdown: time left + a bar that drains over the access window */
+  .cd{ display:inline-flex; flex-direction:column; gap:4px; min-width:118px; padding:5px 10px 6px; border-radius:10px; border:1px solid transparent; font-variant-numeric:tabular-nums; }
+  .cd .cd-t{ font-size:12.5px; font-weight:700; white-space:nowrap; letter-spacing:.01em; }
+  .cd .cd-bar{ display:block; height:4px; border-radius:3px; background:rgba(15,31,61,.10); overflow:hidden; }
+  .cd .cd-bar i{ display:block; height:100%; width:100%; border-radius:3px; transition:width 1s linear; }
+  .cd-ok{ background:#ecfdf3; border-color:#b7e4c7; color:#18794e; } .cd-ok .cd-bar i{ background:#2fa66a; }
+  .cd-warn{ background:#fff7e0; border-color:#f3d17a; color:#8a5a00; } .cd-warn .cd-bar i{ background:#e8a317; }
+  .cd-crit{ background:#fee9e7; border-color:#f5b1ab; color:#b42318; animation:cdPulse 1.6s ease-in-out infinite; } .cd-crit .cd-bar i{ background:#d92d20; }
+  .cd-over{ background:#b42318; border-color:#b42318; color:#fff; } .cd-over .cd-bar{ background:rgba(255,255,255,.3); }
+  .cd-hold{ opacity:.75; animation:none; }
+  @keyframes cdPulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(217,45,32,0); } 50%{ box-shadow:0 0 0 4px rgba(217,45,32,.22); } }
+  @media (prefers-reduced-motion:reduce){ .cd-crit{ animation:none; } .cd .cd-bar i{ transition:none; } }
   .access-wrap{ display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
   .days-lbl{ display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#516079; white-space:nowrap; }
   input.days-in{ width:56px; padding:5px 7px; border:1px solid var(--line); border-radius:8px; font:inherit; font-size:13px; text-align:right; }
@@ -1133,8 +1145,27 @@ function accessInfo(r){
   const ms=deadline.getTime()-Date.now();
   const daysLeft=Math.ceil(ms/86400000);
   if(ms<=0){ const over=Math.abs(daysLeft); if(r.hold) return { cls:"exp-warn", text:"On hold"+(over>0?" ("+over+"d over)":""), expired:true, daysLeft }; return { cls:"exp-over", text:"Expired"+(over>0?" ("+over+"d ago)":""), expired:true, daysLeft }; }
-  return { cls:(daysLeft<=2?"exp-warn":"exp-ok"), text:daysLeft+" day"+(daysLeft===1?"":"s")+" left", expired:false, daysLeft };
+  return { cls:(daysLeft<=2?"exp-warn":"exp-ok"), text:daysLeft+" day"+(daysLeft===1?"":"s")+" left", expired:false, daysLeft, deadline:deadline.getTime(), windowMs:days*86400000, hold:!!r.hold };
 }
+// Live countdown text + urgency level for a deadline (ms since epoch).
+function countdownParts(deadline){
+  const ms=deadline-Date.now(); if(ms<=0) return { text:"Expired", lvl:"over", ms };
+  const s=Math.floor(ms/1000), d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60), sec=s%60, p=n=>String(n).padStart(2,"0");
+  const text = d>0 ? d+"d "+p(h)+"h "+p(m)+"m" : p(h)+":"+p(m)+":"+p(sec);
+  return { text, lvl: ms<=86400000 ? "crit" : ms<=3*86400000 ? "warn" : "ok", ms };
+}
+// One timer updates every countdown on screen (each second; cheap - a handful of cells).
+function tickCountdowns(){
+  document.querySelectorAll(".cd[data-deadline]").forEach(el=>{
+    const dl=+el.getAttribute("data-deadline"), win=+el.getAttribute("data-window")||1, hold=el.getAttribute("data-hold")==="1";
+    const c=countdownParts(dl);
+    if(c.ms<=0){ if(!el.classList.contains("cd-over")){ el.className="cd cd-over"; el.querySelector(".cd-t").textContent=hold?"On hold - window ended":"Expired - revoking"; el.querySelector(".cd-bar i").style.width="0%"; } return; }
+    el.className="cd cd-"+c.lvl+(hold?" cd-hold":"");
+    el.querySelector(".cd-t").textContent=c.text+" left";
+    el.querySelector(".cd-bar i").style.width=Math.max(2,Math.min(100,c.ms/win*100)).toFixed(1)+"%";
+  });
+}
+setInterval(tickCountdowns,1000);
 // Forms multi-select answers arrive as a JSON array string, e.g. ["Keystroke","Snapshot"]; older rows as "Snapshot;".
 function typeList(t){
   t=(t==null?"":String(t)).trim(); if(!t) return [];
@@ -1329,7 +1360,10 @@ function render(){
           : (stLow==="pending"||stLow==="in progress") ? `<button class="btn-link-policy" data-act="link-policy" title="Granted by hand in Teramind? Enter the policy ID: the request is marked Done from today, the access window starts counting and the automation removes the policy when it ends.">Link manual policy…</button>`
           : '<span class="muted">—</span>');
       const holdBox = (stLow==="done") ? `<label class="hold-lbl" title="Tick to stop the automatic revoke for this request (the owner keeps getting reminders instead)"><input type="checkbox" data-act="hold"${r.hold?" checked":""}${ro?' data-ro="1"':""}> Hold</label>` : "";
-      const accessCell=`<div class="access-wrap">${daysIn}<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>${policyTag}${holdBox}</div>`;
+      const expEl = (ai.deadline && !ai.expired)
+        ? `<span class="cd" data-deadline="${ai.deadline}" data-window="${ai.windowMs}" data-hold="${ai.hold?1:0}" title="Access ends ${esc(new Date(ai.deadline).toLocaleString(undefined,{weekday:"short",day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}))}${ai.hold?" - on hold, will not be revoked automatically":" - removed automatically at that time"}"><span class="cd-t">${esc(ai.text)}</span><span class="cd-bar"><i></i></span></span>`
+        : `<span class="exp ${ai.cls}"${aiTitle}>${esc(ai.text)}</span>`;
+      const accessCell=`<div class="access-wrap">${daysIn}${expEl}${policyTag}${holdBox}</div>`;
       const lastUp = r.updatedBy ? `${esc(r.updatedBy)}<div class="lastup-date muted">${esc(fmt(r.updatedAt))}</div>` : '<span class="muted">—</span>';
       const isRevoked=stLow==="revoked";
       const canApprove = (stLow==="pending"||stLow==="in progress");
@@ -1359,7 +1393,7 @@ function render(){
     }).join("");
   }
   $("foot").textContent=`${list.length} of ${rows.length} request${rows.length===1?"":"s"} shown`;
-  markClamps(); fitTable(); try{ updateDupeBtn(); }catch(e){}
+  markClamps(); fitTable(); try{ updateDupeBtn(); }catch(e){} try{ tickCountdowns(); }catch(e){}
 }
 
 // Add a "Show more / Show less" toggle only to content cells whose text is actually clipped.
