@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · approval-screenshot build (20 Nov) -->
+<!-- GoTeam Access Request Center · screenshot-on-edit build (20 Nov) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -413,6 +413,13 @@
           <div><label>Ticket</label><input type="text" id="gmTicket" placeholder="e.g. INC-1234"><div class="hint" id="gmTicketHint">Required for keystroke access.</div></div>
           <div><label>Approved by</label><input type="text" id="gmApprover" readonly></div>
         </div>
+        <div><label>Approval screenshot <span style="font-weight:400">(optional — the chat or email where this was approved)</span></label>
+          <div class="mm-drop" id="gmDrop" tabindex="0">
+            <div class="mm-drop-t">Paste a screenshot (<b>Ctrl+V</b>), drag an image in, or <a href="#" id="gmPick">choose a file</a></div>
+            <div class="mm-thumbs" id="gmThumbs"></div>
+            <input type="file" id="gmFile" accept="image/*" multiple style="display:none">
+          </div>
+          <div class="hint" id="gmProofHint">Up to 3 images, 4 MB each. Saved to SharePoint (folder “ARC-approvals”) and linked on the request.</div></div>
         <div class="m-err" id="gmErr"></div>
       </div>
       <div class="m-foot">
@@ -961,6 +968,46 @@ function mmCheckEmail(){
   h.innerHTML = a ? '<span style="color:#1a7f4b">✓ In Teramind: '+esc(a.name)+'</span>' : '<span style="color:#b42318">✗ Not a Teramind login — access can only be granted to an existing Teramind account</span>';
   if(a && !$("mmName").value.trim()) $("mmName").value=a.name;
 }
+/* ---- Approval screenshots on the Approve / Edit window (same storage as the manual request) ---- */
+let GM_FILES=[];
+function gmRenderThumbs(){ $("gmThumbs").innerHTML=GM_FILES.map((f,i)=>`<div class="mm-thumb" title="${esc(f.name)}"><img src="${f.url}" alt=""><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join(""); }
+function gmAddFiles(list){
+  for(const f of list){
+    if(!f || !/^image\//.test(f.type)) continue;
+    if(GM_FILES.length>=3){ gmError("Up to 3 screenshots at a time."); break; }
+    if(f.size>4*1024*1024){ gmError("“"+(f.name||"image")+"” is larger than 4 MB — crop it or take a smaller screenshot."); continue; }
+    GM_FILES.push({ file:f, name:f.name||"screenshot.png", url:URL.createObjectURL(f) });
+  }
+  gmRenderThumbs();
+}
+function gmClearFiles(){ GM_FILES.forEach(f=>{ try{ URL.revokeObjectURL(f.url); }catch(e){} }); GM_FILES=[]; gmRenderThumbs(); }
+async function uploadProofFiles(files, reqId){
+  const out=[]; const stamp=new Date().toISOString().replace(/[-:T]/g,"").slice(2,12);
+  for(let i=0;i<files.length;i++){
+    const f=files[i].file; const ext=((f.type||"image/png").split("/")[1]||"png").replace("jpeg","jpg").replace(/[^a-z0-9]/gi,"")||"png";
+    const name=reqId+"-approval-"+stamp+"-"+(i+1)+"."+ext;
+    const r=await graph("/drives/"+DRIVE_ID+"/root:/ARC-approvals/"+encodeURIComponent(name)+":/content?@microsoft.graph.conflictBehavior=rename",{ method:"PUT", headers:{ "Content-Type": f.type||"application/octet-stream" }, body:f });
+    if(!r || !r.webUrl) throw new Error("upload of "+name+" returned no link");
+    out.push(r.webUrl);
+  }
+  return out;
+}
+// Add screenshot links to the request's own row (Notes column of the responses table), keeping any links already there.
+async function attachProofToRequest(rec, urls){
+  if(!urls.length) return;
+  const hdr=(await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/headerRowRange?$select=values")).values[0];
+  const m=mapHeaders(hdr); if(m.id<0 || m.reqNotes<0) throw new Error("the responses table has no Id / Notes column");
+  const rr=(await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/rows?$select=index,values")).value||[];
+  const hit=rr.filter(x=>String(x.values[0][m.id])===String(rec.id));
+  if(hit.length!==1) throw new Error(hit.length?"more than one row for this request in the responses table":"this request's row was not found in the responses table");
+  const vals=hit[0].values[0].slice(); const old=splitProof(vals[m.reqNotes]);
+  const all=old.urls.concat(urls.filter(u=>old.urls.indexOf(u)<0));
+  vals[m.reqNotes]=(old.text?old.text.replace(/\s+$/,"")+" ":"")+"[proof: "+all.join(" ")+"]";
+  await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/rows/itemAt(index="+hit[0].index+")",{method:"PATCH",body:JSON.stringify({values:[vals]})});
+  rec.reqNotes=vals[m.reqNotes];
+  // keep the in-memory copy of the sheet in step so a re-render shows the link straight away
+  if(lastValues && lastValues.length){ const lm=mapHeaders(lastValues[0]); if(lm.id>=0 && lm.reqNotes>=0){ const lr=lastValues.find((r,i)=>i>0 && String(r[lm.id])===String(rec.id)); if(lr) lr[lm.reqNotes]=vals[m.reqNotes]; } }
+}
 let MM_FILES=[];   // images attached to the manual request being entered
 function mmRenderThumbs(){
   $("mmThumbs").innerHTML=MM_FILES.map((f,i)=>`<div class="mm-thumb" title="${esc(f.name)}"><img src="${f.url}" alt=""><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join("");
@@ -1504,6 +1551,13 @@ function wire(){
   wireLinkModal();
   $("manualBtn").onclick=openManualModal; $("mmCancel").onclick=closeManualModal; $("mmSave").onclick=()=>saveManualRequest();
   $("mmEmail").addEventListener("input", mmCheckEmail);
+  $("gmPick").addEventListener("click",(e)=>{ e.preventDefault(); $("gmFile").click(); });
+  $("gmFile").addEventListener("change",(e)=>{ gmAddFiles([...e.target.files]); e.target.value=""; });
+  $("gmThumbs").addEventListener("click",(e)=>{ const b=e.target.closest("[data-rm]"); if(!b) return; const i=+b.getAttribute("data-rm"); try{ URL.revokeObjectURL(GM_FILES[i].url); }catch(_){} GM_FILES.splice(i,1); gmRenderThumbs(); });
+  $("grantModal").addEventListener("paste",(e)=>{ const imgs=[...(e.clipboardData&&e.clipboardData.items||[])].filter(it=>it.kind==="file"&&/^image\//.test(it.type)).map(it=>it.getAsFile()); if(imgs.length){ e.preventDefault(); gmAddFiles(imgs); } });
+  { const gz=$("gmDrop"); ["dragenter","dragover"].forEach(ev=>gz.addEventListener(ev,(e)=>{ e.preventDefault(); gz.classList.add("over"); }));
+    ["dragleave","drop"].forEach(ev=>gz.addEventListener(ev,(e)=>{ e.preventDefault(); gz.classList.remove("over"); }));
+    gz.addEventListener("drop",(e)=>{ gmAddFiles([...(e.dataTransfer&&e.dataTransfer.files||[])]); }); }
   $("mmPick").addEventListener("click",(e)=>{ e.preventDefault(); $("mmFile").click(); });
   $("mmFile").addEventListener("change",(e)=>{ mmAddFiles([...e.target.files]); e.target.value=""; });
   $("mmThumbs").addEventListener("click",(e)=>{ const b=e.target.closest("[data-rm]"); if(!b) return; const i=+b.getAttribute("data-rm"); try{ URL.revokeObjectURL(MM_FILES[i].url); }catch(_){} MM_FILES.splice(i,1); mmRenderThumbs(); });
@@ -1598,6 +1652,8 @@ function openGrantModal(rec, edit){
   { const me=currentItStaff(); $("gmApprover").value=me?me.name:((account&&(account.name||account.username))||""); }
   updateTicketHint();
   $("gmErr").style.display="none"; $("gmErr").textContent="";
+  gmClearFiles();
+  { const n=splitProof(rec.reqNotes).urls.length; $("gmProofHint").textContent=(n?n+" screenshot"+(n===1?" is":"s are")+" already attached to this request; new ones are added to "+(n===1?"it":"them")+". ":"")+"Up to 3 images, 4 MB each. Saved to SharePoint (folder “ARC-approvals”) and linked on the request."; }
   $("gmConfirm").dataset.busy="0"; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant"; updateConfirmState();
   $("grantModal").classList.add("open");
   setTimeout(()=>$("gmSearch").focus(),50);
@@ -1724,6 +1780,12 @@ async function confirmGrant(){
   $("gmConfirm").dataset.busy="1"; $("gmConfirm").disabled=true; $("gmConfirm").textContent="Queuing…";
   try{
     if(!DRIVE_ID) await resolveWorkbook();
+    if(GM_FILES.length){
+      $("gmConfirm").textContent="Uploading screenshot"+(GM_FILES.length>1?"s":"")+"…";
+      const urls=await uploadProofFiles(GM_FILES, rec.id);
+      await attachProofToRequest(rec, urls);
+      gmClearFiles(); $("gmConfirm").textContent="Queuing…";
+    }
     const editPid = grantEdit ? String(rec.policyId||"") : "";
     // ORDER MATTERS: write "Approved" to the tracking sheet FIRST and only then queue the grant. The worker picks a
     // queued row up within seconds; if the (slower) tracking save landed after the worker had already written Done,
