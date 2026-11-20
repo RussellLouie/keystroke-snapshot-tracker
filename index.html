@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · live-countdown build (20 Nov) -->
+<!-- GoTeam Access Request Center · approval-screenshot build (20 Nov) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -144,6 +144,14 @@
   .exp{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; white-space:nowrap; }
   .exp-ok{ background:#eef1f6; color:#516079; } .exp-warn{ background:#fef3c7; color:#92600e; } .exp-over{ background:#fee2e2; color:#b42318; }
   .exp-await{ background:#e8f0ff; color:#2f5bb0; }
+  .mm-drop{ border:1.5px dashed #c5cede; border-radius:10px; padding:10px 12px; background:#fafbfd; outline:none; }
+  .mm-drop:focus, .mm-drop.over{ border-color:var(--brand); background:#f3f7ff; }
+  .mm-drop-t{ font-size:12.5px; color:#516079; }
+  .mm-thumbs{ display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; } .mm-thumbs:empty{ display:none; }
+  .mm-thumb{ position:relative; width:96px; height:64px; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#fff; }
+  .mm-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .mm-thumb button{ position:absolute; top:2px; right:2px; width:18px; height:18px; border-radius:50%; border:0; background:rgba(15,31,61,.75); color:#fff; font-size:11px; line-height:18px; padding:0; cursor:pointer; }
+  .proof-link{ display:inline-block; margin:4px 6px 0 0; font-size:11.5px; font-weight:600; color:var(--brand); text-decoration:none; white-space:nowrap; } .proof-link:hover{ text-decoration:underline; }
   /* live countdown: time left + a bar that drains over the access window */
   .cd{ display:inline-flex; flex-direction:column; gap:4px; min-width:118px; padding:5px 10px 6px; border-radius:10px; border:1px solid transparent; font-variant-numeric:tabular-nums; }
   .cd .cd-t{ font-size:12.5px; font-weight:700; white-space:nowrap; letter-spacing:.01em; }
@@ -467,6 +475,13 @@
           <div><label>Ticket ID <span style="font-weight:400">(if there is one)</span></label><input type="text" id="mmTicket" placeholder="ISUP-…" autocomplete="off"></div>
           <div><label>Where it came from / who approved</label><input type="text" id="mmSource" placeholder="e.g. Teams chat with Olem 19 Nov; approved by Romel Reston"></div>
         </div>
+        <div><label>Approval screenshot <span style="font-weight:400">(optional — the chat or email where it was approved)</span></label>
+          <div class="mm-drop" id="mmDrop" tabindex="0">
+            <div class="mm-drop-t">Paste a screenshot here (<b>Ctrl+V</b>), drag an image in, or <a href="#" id="mmPick">choose a file</a></div>
+            <div class="mm-thumbs" id="mmThumbs"></div>
+            <input type="file" id="mmFile" accept="image/*" multiple style="display:none">
+          </div>
+          <div class="hint">Up to 3 images, 4 MB each. Saved to the IT Operations SharePoint (folder “ARC-approvals”) and linked on the request.</div></div>
         <div class="m-err" id="mmErr"></div>
       </div>
       <div class="m-foot">
@@ -946,11 +961,44 @@ function mmCheckEmail(){
   h.innerHTML = a ? '<span style="color:#1a7f4b">✓ In Teramind: '+esc(a.name)+'</span>' : '<span style="color:#b42318">✗ Not a Teramind login — access can only be granted to an existing Teramind account</span>';
   if(a && !$("mmName").value.trim()) $("mmName").value=a.name;
 }
+let MM_FILES=[];   // images attached to the manual request being entered
+function mmRenderThumbs(){
+  $("mmThumbs").innerHTML=MM_FILES.map((f,i)=>`<div class="mm-thumb" title="${esc(f.name)}"><img src="${f.url}" alt=""><button type="button" data-rm="${i}" aria-label="Remove">×</button></div>`).join("");
+}
+function mmAddFiles(list){
+  for(const f of list){
+    if(!f || !/^image\//.test(f.type)) continue;
+    if(MM_FILES.length>=3){ mmError("Up to 3 screenshots per request."); break; }
+    if(f.size>4*1024*1024){ mmError("“"+(f.name||"image")+"” is larger than 4 MB — crop it or take a smaller screenshot."); continue; }
+    MM_FILES.push({ file:f, name:f.name||"screenshot.png", url:URL.createObjectURL(f) });
+  }
+  mmRenderThumbs();
+}
+function mmClearFiles(){ MM_FILES.forEach(f=>{ try{ URL.revokeObjectURL(f.url); }catch(e){} }); MM_FILES=[]; mmRenderThumbs(); }
+// Upload the screenshots next to the workbook (library root / ARC-approvals) and return their SharePoint links.
+async function mmUploadFiles(reqId){
+  const out=[];
+  for(let i=0;i<MM_FILES.length;i++){
+    const f=MM_FILES[i].file; const ext=((f.type||"image/png").split("/")[1]||"png").replace("jpeg","jpg").replace(/[^a-z0-9]/gi,"")||"png";
+    const name=reqId+"-approval-"+(i+1)+"."+ext;
+    const r=await graph("/drives/"+DRIVE_ID+"/root:/ARC-approvals/"+encodeURIComponent(name)+":/content?@microsoft.graph.conflictBehavior=rename",{ method:"PUT", headers:{ "Content-Type": f.type||"application/octet-stream" }, body:f });
+    if(!r || !r.webUrl) throw new Error("upload of "+name+" returned no link");
+    out.push(r.webUrl);
+  }
+  return out;
+}
+// "…text… [proof: url1 url2]" in the requester-notes cell -> text + links
+function splitProof(notes){
+  const m=String(notes||"").match(/\s*\[proof:\s*([^\]]+)\]\s*$/i);
+  if(!m) return { text:String(notes||""), urls:[] };
+  return { text:String(notes).slice(0,m.index), urls:m[1].split(/\s+/).filter(u=>/^https:\/\//i.test(u)) };
+}
 function openManualModal(){
   const me=currentItStaff(); if(!me||!me.approve) return notApproverPrompt("add a manual request");
   ["mmName","mmEmail","mmScope","mmReason","mmTicket","mmSource"].forEach(i=>$(i).value="");
   $("mmDays").value=CONFIG.accessDays||7; $("mmPrio").value="Medium"; $("mmEmailHint").textContent="";
   $("mmType").querySelectorAll("input").forEach(c=>c.checked=false);
+  mmClearFiles();
   mmError(""); $("mmSave").disabled=false; $("mmSave").textContent="Add request";
   $("manualModal").classList.add("open"); setTimeout(()=>$("mmName").focus(),50);
 }
@@ -980,8 +1028,10 @@ async function saveManualRequest(){
     const id="M"+String(d.getFullYear()).slice(2)+p2(d.getMonth()+1)+p2(d.getDate())+"-"+p2(d.getHours())+p2(d.getMinutes())+p2(d.getSeconds());
     const row=hdr.map(()=> "");
     const put=(k,v)=>{ if(m[k]>=0) row[m[k]]=v; };
+    let proof=[];
+    if(MM_FILES.length){ $("mmSave").textContent="Uploading screenshot"+(MM_FILES.length>1?"s":"")+"…"; proof=await mmUploadFiles(id); $("mmSave").textContent="Adding…"; }
     put("id",id); put("submitted",d.toISOString()); put("requester",name); put("type",types.join("; ")); put("content",reason);
-    put("priority",$("mmPrio").value); put("reqNotes","Manual entry by "+me.name+" — "+source); put("ticketRaised",ticket?"Yes":"No"); put("ticketId",ticket);
+    put("priority",$("mmPrio").value); put("reqNotes","Manual entry by "+me.name+" — "+source+(proof.length?" [proof: "+proof.join(" ")+"]":"")); put("ticketRaised",ticket?"Yes":"No"); put("ticketId",ticket);
     put("email",email); put("scope",scope.join("; ")); put("reqDays",days+" days");
     await graph(itemBase()+"/workbook/tables/"+CONFIG.responseTable+"/rows/add",{method:"POST",body:JSON.stringify({values:[row]})});
     // show it straight away (Excel may take a few seconds to return the new row on a re-read)
@@ -989,7 +1039,7 @@ async function saveManualRequest(){
     buildRows(lastValues);
     const rec=rows.find(x=>String(x.id)===id);
     if(rec){ try{ await withRetry(()=>saveTracking(rec,{ owner:me.name, accessDays:days, notes:("Manual request ("+source+")").slice(0,200) })); }catch(e){} }
-    closeManualModal(); sortKey="submitted"; sortDir=-1; render();
+    mmClearFiles(); closeManualModal(); sortKey="submitted"; sortDir=-1; render();
     showBanner("Manual request "+id+" added for "+name+" with you as owner. Review it and click Approve & grant.","info");
   }catch(err){
     $("mmSave").disabled=false; $("mmSave").textContent="Add request";
@@ -1381,7 +1431,7 @@ function render(){
         <td class="content">${r.content?`<div class="clamp" title="${esc(r.content)}">${esc(r.content)}</div>`:'<span class="muted">—</span>'}${scopeLine(r)}</td>
         <td>${r.priority?`<span class="pill ${prioClass(r.priority)}">${esc(r.priority)}</span>`:""}</td>
         <td class="ticket">${ticket}</td>
-        <td class="content">${r.reqNotes?`<div class="clamp" title="${esc(r.reqNotes)}">${esc(r.reqNotes)}</div>`:'<span class="muted">—</span>'}</td>
+        <td class="content">${(()=>{ const pr=splitProof(r.reqNotes); return (pr.text?`<div class="clamp" title="${esc(pr.text)}">${esc(pr.text)}</div>`:(pr.urls.length?"":'<span class="muted">—</span>'))+pr.urls.map((u,i)=>`<a class="proof-link" href="${esc(u)}" target="_blank" rel="noopener" title="Open the approval screenshot in SharePoint">📎 Approval screenshot${pr.urls.length>1?" "+(i+1):""}</a>`).join(""); })()}</td>
         <td>${accessCell}</td>
         <td class="policy-cell">${policyCell}</td>
         <td><select class="owner-sel${(!r.owner&&canApprove)?" owner-missing":""}" data-act="owner"${ro?' data-ro="1"':""} title="${(!r.owner&&canApprove)?"No owner yet — assign who in IT is handling this request before approving":""}">${ownerOpts}</select>${(!r.owner&&canApprove)?'<div class="owner-hint">← assign first</div>':""}</td>
@@ -1454,6 +1504,13 @@ function wire(){
   wireLinkModal();
   $("manualBtn").onclick=openManualModal; $("mmCancel").onclick=closeManualModal; $("mmSave").onclick=()=>saveManualRequest();
   $("mmEmail").addEventListener("input", mmCheckEmail);
+  $("mmPick").addEventListener("click",(e)=>{ e.preventDefault(); $("mmFile").click(); });
+  $("mmFile").addEventListener("change",(e)=>{ mmAddFiles([...e.target.files]); e.target.value=""; });
+  $("mmThumbs").addEventListener("click",(e)=>{ const b=e.target.closest("[data-rm]"); if(!b) return; const i=+b.getAttribute("data-rm"); try{ URL.revokeObjectURL(MM_FILES[i].url); }catch(_){} MM_FILES.splice(i,1); mmRenderThumbs(); });
+  $("manualModal").addEventListener("paste",(e)=>{ const imgs=[...(e.clipboardData&&e.clipboardData.items||[])].filter(it=>it.kind==="file"&&/^image\//.test(it.type)).map(it=>it.getAsFile()); if(imgs.length){ e.preventDefault(); mmAddFiles(imgs); } });
+  const dz=$("mmDrop"); ["dragenter","dragover"].forEach(ev=>dz.addEventListener(ev,(e)=>{ e.preventDefault(); dz.classList.add("over"); }));
+  ["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,(e)=>{ e.preventDefault(); dz.classList.remove("over"); }));
+  dz.addEventListener("drop",(e)=>{ mmAddFiles([...(e.dataTransfer&&e.dataTransfer.files||[])]); });
   $("manualModal").addEventListener("click",(e)=>{ if(e.target===$("manualModal")) closeManualModal(); });
   $("dedupeBtn").onclick=function(){ cleanDuplicateRows(this).catch(e=>showBanner("Clean-up failed: "+((e&&e.message)||e),"err")); };
   $("gmEmail").addEventListener("input", checkEmailField);
