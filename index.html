@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- GoTeam Access Request Center · screenshot-on-edit build (20 Nov) -->
+<!-- GoTeam Access Request Center · 7-day-default build (26 Nov) -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -397,7 +397,7 @@
               <label class="feat"><input type="checkbox" value="player.history"> Video playback <span class="hint">Play historic screen stream · requires Snapshots</span></label>
             </div>
             <div class="muted" id="gmFeatNote" style="font-size:11px;margin-top:4px;display:none">Snapshots is included automatically — Teramind needs it for Video playback to work.</div></div>
-          <div><label>Access window (days)</label><input type="number" id="gmDays" min="1" max="365" step="1"></div>
+          <div><label>Access window (days)</label><input type="number" id="gmDays" min="1" max="365" step="1"><div class="hint" id="gmDaysHint" style="display:none;color:#92600e;font-weight:600"></div></div>
         </div>
         <div><label>Who they may view</label>
           <div class="picker" id="gmPicker">
@@ -1547,6 +1547,7 @@ function wire(){
   $("gmCancel").onclick=closeGrantModal;
   $("gmConfirm").onclick=confirmGrant;
   $("gmFeature").addEventListener("change", ()=>{ enforceFeatureRules(); updateTicketHint(); });
+  $("gmDays").addEventListener("input", updateDaysHint);
   wirePicker();
   wireLinkModal();
   $("manualBtn").onclick=openManualModal; $("mmCancel").onclick=closeManualModal; $("mmSave").onclick=()=>saveManualRequest();
@@ -1639,7 +1640,9 @@ function openGrantModal(rec, edit){
   setFeatures(rec.feature ? rec.feature.split(/[;,]/).map(x=>x.trim()).filter(Boolean) : featuresForType(rec.type));
   // Window: a value already set on the row wins; otherwise the number the requester asked for; otherwise the default.
   let ovr=(rec.accessDays==null||String(rec.accessDays).trim()==="")?NaN:Number(rec.accessDays);
-  if(isNaN(ovr)||ovr<=0){ const m=String(rec.reqDays||"").match(/\d+/); if(m) ovr=Math.min(365,Math.max(1,parseInt(m[0],10))); }
+  // Policy (26 Nov 2026): the standard window is 7 days. What the requester asked for never raises the default above
+  // that - a longer window is typed in by the approver once the GoTeam President's approval is on hand.
+  if(isNaN(ovr)||ovr<=0){ const m=String(rec.reqDays||"").match(/\d+/); if(m) ovr=Math.min(CONFIG.accessDays,Math.max(1,parseInt(m[0],10))); }
   $("gmDays").value=(!isNaN(ovr)&&ovr>0)?ovr:CONFIG.accessDays;
   // Scope: what was approved before, else what the requester wrote on the form (one entry per line).
   const seed = rec.subjects ? rec.subjects.split(/;\s*/) : String(rec.scope||"").split(/[\n;,]+/);
@@ -1652,7 +1655,7 @@ function openGrantModal(rec, edit){
   { const me=currentItStaff(); $("gmApprover").value=me?me.name:((account&&(account.name||account.username))||""); }
   updateTicketHint();
   $("gmErr").style.display="none"; $("gmErr").textContent="";
-  gmClearFiles();
+  gmClearFiles(); updateDaysHint();
   { const n=splitProof(rec.reqNotes).urls.length; $("gmProofHint").textContent=(n?n+" screenshot"+(n===1?" is":"s are")+" already attached to this request; new ones are added to "+(n===1?"it":"them")+". ":"")+"Up to 3 images, 4 MB each. Saved to SharePoint (folder “ARC-approvals”) and linked on the request."; }
   $("gmConfirm").dataset.busy="0"; $("gmConfirm").textContent= grantEdit ? "Save changes" : "Approve & queue grant"; updateConfirmState();
   $("grantModal").classList.add("open");
@@ -1752,6 +1755,12 @@ function checkEmailField(){
   }
 }
 function openSugRefresh(){ const el=$("gmSug"); [...el.querySelectorAll(".it")].forEach((n,i)=>n.classList.toggle("active", i===sugIdx)); }
+// Reminder shown when the window is longer than the standard 7 days.
+function updateDaysHint(){
+  const h=$("gmDaysHint"); if(!h) return; const d=parseInt($("gmDays").value,10);
+  if(!isNaN(d) && d>CONFIG.accessDays){ h.textContent="⚠ More than "+CONFIG.accessDays+" days needs approval from Tim Langan (GoTeam President) — attach it as the approval screenshot below."; h.style.display="block"; }
+  else h.style.display="none";
+}
 function gmError(msg){ const el=$("gmErr"); el.textContent=msg; el.style.display="block"; }
 async function confirmGrant(){
   const rec=grantTarget; if(!rec) return;
@@ -1887,7 +1896,7 @@ function openLinkModal(rec, me){
   $("lmDaysRow").style.display = isDone ? "none" : "grid";
   if(!isDone){
     let d=(rec.accessDays==null||String(rec.accessDays).trim()==="")?NaN:Number(rec.accessDays);
-    if(isNaN(d)||d<=0){ const m=String(rec.reqDays||"").match(/\d+/); if(m) d=parseInt(m[0],10); }
+    if(isNaN(d)||d<=0){ const m=String(rec.reqDays||"").match(/\d+/); if(m) d=Math.min(CONFIG.accessDays,parseInt(m[0],10)); }
     if(isNaN(d)||d<=0) d=CONFIG.accessDays;
     $("lmDays").value=d;
   }
